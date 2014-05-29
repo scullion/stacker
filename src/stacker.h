@@ -211,7 +211,8 @@ enum RuleFlag {
 	                                  // applied to matching nodes.
 	RFLAG_GLOBAL            = 1 << 1, // Create a global rule.
 	RFLAG_IN_DOCUMENT_TABLE = 1 << 2, // Rule is in a document rule table.
-	RFLAG_IN_SYSTEM_TABLE   = 1 << 3  // Rule is in the system rule table.
+	RFLAG_IN_SYSTEM_TABLE   = 1 << 3, // Rule is in the system rule table.
+	RFLAG_MODIFIES_CLASS    = 1 << 4  // Rule alters the "class" attribute.
 };
 
 /* A set of rule keys representing a multi-clause selector expression. */

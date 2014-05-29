@@ -123,6 +123,8 @@ static int create_rule(
 			if (rc < 0)
 				return rc;
 			attribute_block_size += (unsigned)rc;
+			if (attributes[i].name == TOKEN_CLASS)
+				flags |= RFLAG_MODIFIES_CLASS;
 		}
 	} 
 	unsigned bytes_required = sizeof(Rule);
@@ -422,33 +424,33 @@ int set_string_attribute(Rule *rule, int name,
 	ValueSemantic vs, const char *value, int length)
 {
 	int rc = abuf_set_string(&rule->attributes, name, vs, value, length);
+	if (rc < 0)
+		return rc;
+	if (name == TOKEN_CLASS && (rule->flags & RFLAG_MODIFIES_CLASS) == 0) {
+		rule->flags |= RFLAG_MODIFIES_CLASS;
+		rc = 1;
+	}
 	if (rc == 1)
 		rule_revised(rule);
 	return rc;
 }
 
 /* Builds an array of rule keys representing all selectors a node can match. */
-unsigned make_node_rule_keys(const System *system, 
-	int node_token, unsigned node_flags, const char *cls, unsigned cls_length, 
+unsigned make_node_rule_keys(const System *system, int node_token, 
+	unsigned node_flags, const char *cls, unsigned cls_length, 
 	uint64_t *keys, unsigned max_keys)
 {
-	/* Parse the class attribute to produce a set of hashed class names. */
+	/* Hash each class name. */
 	uint64_t class_names[MAX_RULE_CLASSES + 1];
 	unsigned num_classes = 0;
 	if (cls != NULL) {
-		for (unsigned i = 0; i < cls_length && 
-			num_classes != MAX_RULE_CLASSES; ++i) {
-			while (i != cls_length && (isspace(cls[i]) || cls[i] == ','))
-				++i;
-			if (isidentfirst(cls[i])) {
-				unsigned start = i;
-				do { 
-					i++; 
-				} while (i != cls_length && isident(cls[i]));
-				class_names[num_classes++] = murmur3_64(cls + start, i - start);
-			} else {
+		unsigned part_length;
+		const char *end = cls + cls_length;
+		for (const char *part = cls; part != end; part += part_length + 1) {
+			if (num_classes == MAX_RULE_CLASSES)
 				break;
-			}
+			part_length = strlen(part);
+			class_names[num_classes++] = murmur3_64(part, part_length);
 		}
 	}
 

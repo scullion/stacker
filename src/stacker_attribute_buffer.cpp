@@ -243,7 +243,7 @@ static unsigned supported_operators(AttributeSemantic semantic)
  * storage form for string sets: zero or more null-terminated strings 
  * concatenated end to end, terminated by an extra null at the end. Returns 
  * a negative error code if the string has inconsistent delimiters. */
-static int parse_string_list(const char *s, int length, char *buffer, 
+int parse_string_list(const char *s, int length, char *buffer, 
 	unsigned buffer_size)
 {
 	int result_length = 0, elements = 0;
@@ -300,6 +300,7 @@ static int string_set_unique(char *s, unsigned length)
 	char *d = s;
 	while (*s != '\0') {
 		unsigned item_length = 1 + strlen(s);
+		length -= item_length;
 		if (!string_set_contains(s + item_length, length, s)) {
 			memmove(d, s, item_length);
 			d += item_length;
@@ -733,27 +734,21 @@ static int validate_string(int name, ValueSemantic vs,
 	/* Convert the value to storage form if required. */
 	result->storage = attribute_storage_type(as, mode);
 	if (as == ASEM_STRING_SET) {
-		if (vs == VSEM_LIST) {
-			rc = parse_string_list(value, length, result->buffer, 
-				sizeof(result->buffer));
-			if (rc < 0)
-				return rc;
-			if (rc >= sizeof(result->buffer)) {
-				rc = parse_string_list(value, length, 
-					vresult_allocate(result, rc + 1), rc + 1);
-			} else {
-				result->data = (AttributeData *)result->buffer;
-			}
-			result->size = rc;
-			result->terminators = 1;
-			if (rc >= 0)
-				result->size += string_set_unique(result->data->string, rc);
-			mode = rc < 0 ? rc : ADEF_DEFINED;
+		rc = parse_string_list(value, length, result->buffer, 
+			sizeof(result->buffer));
+		if (rc < 0)
+			return rc;
+		if (rc >= sizeof(result->buffer)) {
+			rc = parse_string_list(value, length, 
+				vresult_allocate(result, rc + 1), rc + 1);
 		} else {
-			/* Convert ordinary strings to string sets by double null 
-			 * terminating them. */
-			result->terminators = 2;
+			result->data = (AttributeData *)result->buffer;
 		}
+		result->size = rc;
+		result->terminators = 1;
+		if (rc >= 0)
+			result->size += string_set_unique(result->data->string, rc);
+		mode = rc < 0 ? rc : ADEF_DEFINED;
 	}
 
 	return mode;

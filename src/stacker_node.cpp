@@ -133,6 +133,7 @@ Node *last_child(Node *node)
 	return node->last_child;
 }
 
+/* Searches for an attribute in the buffers of a node and its matched rules. */
 const Attribute *find_attribute(const Node *node, int name)
 {
 	AttributeIterator iterator;
@@ -142,6 +143,18 @@ const Attribute *find_attribute(const Node *node, int name)
 	return attribute;
 }
 
+/* Searches for an attribute among a node's attribute buffer. The search does
+ * not include attributes from matched rules. */
+const Attribute *find_attribute_no_rules(const Node *node, int name)
+{
+	const Attribute *attribute = abuf_first(&node->attributes);
+	while (attribute != NULL && (attribute->op > AOP_COMPUTED || 
+		attribute->name != name))
+		attribute = abuf_next(&node->attributes, attribute);
+	return attribute;
+}
+
+/* Searches for an attribute in a node and its parents. */
 const Attribute *find_inherited_attribute(const Node *node, int name, 
 	const Node **owner)
 {
@@ -546,7 +559,7 @@ void attribute_changed(Document *document, Node *node, int name)
 	if (is_layout_attribute(name))
 		set_node_flags(document, node, NFLAG_REBUILD_BOXES, true);
 	if (name == TOKEN_CLASS)
-		set_node_flags(document, node, NFLAG_UPDATE_MATCHED_RULES, true);
+		set_node_flags(document, node, NFLAG_UPDATE_RULE_KEYS, true);
 }
 
 /*
@@ -872,6 +885,35 @@ static void initialize_node(Document *document, Node *node)
 	update_node_debug_string(document, node);
 }
 
+/* Makes a provisional set of rule keys for a node before the actually exists.
+ * We do this so we can allocate an initial rule key buffer as part of the
+ * node data. */
+static unsigned make_initial_rule_keys(const System *system, int tag_name,
+	uint64_t *rule_keys, const AttributeAssignment *assignments, 
+	unsigned num_assignments)
+{
+	const char *cls = NULL;
+	unsigned cls_length = 0;
+	char parsed_classes[512];
+	for (unsigned i = 0; i < num_assignments; ++i) {
+		if (assignments[i].name == TOKEN_CLASS) {
+			cls = assignments[i].value.string.data;
+			cls_length = assignments[i].value.string.length;
+			break;
+		}
+	}
+	if (cls != NULL) {
+		int rc = parse_string_list(cls, cls_length, parsed_classes, 
+			sizeof(parsed_classes));
+		if (rc >= 0) {
+			cls = parsed_classes;
+			cls_length = rc;
+		}
+	}
+	return make_node_rule_keys(system, tag_name, 0,
+		cls, cls_length, rule_keys, MAX_NODE_RULE_KEYS); 
+}
+
 /* Creates a node object from an initial attribute set and text content.  */
 int create_node(Node **result, Document *document, NodeType type, int tag_name,
 	const AttributeAssignment *assignments, unsigned num_assignments, 
@@ -881,18 +923,9 @@ int create_node(Node **result, Document *document, NodeType type, int tag_name,
 	 * after the node. Rule keys depend on the class attribute, so we have to
 	 * find that in the VA list, and generate rule keys into a temporary 
 	 * buffer before allocating the node. */
-	const char *cls = NULL;
-	unsigned cls_length = 0;
-	for (unsigned i = 0; i < num_assignments; ++i) {
-		if (assignments[i].name == TOKEN_CLASS) {
-			cls = assignments[i].value.string.data;
-			cls_length = assignments[i].value.string.length;
-			break;
-		}
-	}
-	uint64_t rule_keys[MAX_NODE_RULE_KEYS]; 
-	unsigned num_rule_keys = make_node_rule_keys(document->system, tag_name, 0,
-		cls, cls_length, rule_keys, MAX_NODE_RULE_KEYS); 
+	uint64_t rule_keys[MAX_NODE_RULE_KEYS];
+	unsigned num_rule_keys = make_initial_rule_keys(document->system, tag_name,
+		rule_keys, assignments, num_assignments);
 	unsigned rule_key_capacity = std::min(2 * num_rule_keys, MAX_NODE_RULE_KEYS);
 	
 	/* Determine the size of the node and its initial attribute block. */
@@ -1066,12 +1099,18 @@ static void remove_node_layer(Document *document, Node *node, VisualLayer *layer
 
 /* Updates the list of rule table keys identifying selectors a node can 
  * match. */
-static void update_node_rule_keys(Document *document, Node *node)
+static void update_node_rule_keys(Document *document, Node *node, 
+	bool ignore_class_modifiers = false)
 {
 	uint64_t keys[MAX_NODE_RULE_KEYS];
 	const char *cls = NULL;
 	unsigned cls_length = 0;
-	read_as_string(node, TOKEN_CLASS, &cls, &cls_length, NULL);
+	if (ignore_class_modifiers) {
+		const Attribute *attribute = find_attribute_no_rules(node, TOKEN_CLASS);
+		abuf_read_string(attribute, &cls, &cls_length);
+	} else {
+		read_as_string(node, TOKEN_CLASS, &cls, &cls_length);
+	}
 	unsigned num_keys = make_node_rule_keys(document->system, 
 		(Token)node->token, node->flags, cls, cls_length, 
 		keys, MAX_NODE_RULE_KEYS);
@@ -1085,6 +1124,97 @@ static void update_node_rule_keys(Document *document, Node *node)
 	node->num_rule_keys = (uint8_t)num_keys;
 	node->rule_key_capacity = (uint8_t)num_keys;
 	node->flags &= ~NFLAG_UPDATE_RULE_KEYS;
+}
+
+/* Rebuilds a node's array of matched rule references. */
+static bool update_rule_slots(Document *document, Node *node)
+{
+	const Rule *matched[NUM_RULE_SLOTS];
+	unsigned num_matched = match_rules(document, node, 
+		matched, NUM_RULE_SLOTS, &document->rules, 
+		&document->system->global_rules);
+	bool changed = num_matched != node->num_matched_rules;
+	unsigned i;
+	for (i = 0; i < num_matched; ++i) {
+		RuleSlot *slot = node->rule_slots + i;
+		if (i >= node->num_matched_rules || slot->rule != matched[i]) {
+			slot->rule = matched[i];
+			slot->revision = slot->rule->revision - 1;
+			changed = true;
+		}
+	}
+	node->num_matched_rules = (uint8_t)num_matched;
+	node->flags &= ~NFLAG_UPDATE_MATCHED_RULES;
+	if (changed) 
+		node->flags |= NFLAG_COMPUTE_ATTRIBUTES | NFLAG_UPDATE_STYLE;
+	return changed;
+}
+
+/* Looks at the rules matched by a node, and if their attributes have changed
+ * (or the rules themselves have changed), sets the relevant update bits. */
+static void check_rule_slots(Document *document, Node *node)
+{
+	document;
+	bool rules_changed = false;
+	for (unsigned i = 0; i < node->num_matched_rules; ++i) {
+		RuleSlot *slot = node->rule_slots + i;
+		if (slot->revision != slot->rule->revision) {
+			slot->revision = slot->rule->revision;
+			rules_changed = true;
+		}
+	}
+	if (rules_changed)
+		node->flags |= NFLAG_COMPUTE_ATTRIBUTES | NFLAG_UPDATE_STYLE;
+}
+
+/* If necessary, rebuilds a node's rule keys from its class attribute and 
+ * updates its set of matched rules. Rules can add and remove classes, so a
+ * change in matched rules may necessitate a rebuild of the keys, which may
+ * change the set of mactched rules again, and so on ad infinitum. Cycles are
+ * broken by stopping the process as soon as a previously matched rule with a
+ * class modifier is removed from the match set. */
+static void update_matched_rules(Document *document, Node *node)
+{
+	static const unsigned MAX_VISITED = 16;
+	
+	const Rule *visited[MAX_VISITED];
+	unsigned num_visited = 0;
+ 	bool ignore_class_modifiers = true;
+	do {
+		/* Rebuild the rule keys from the class attribute and rematch 
+		 * rules. */
+		if ((node->flags & NFLAG_UPDATE_RULE_KEYS) != 0)
+			update_node_rule_keys(document, node, ignore_class_modifiers);
+		if (!update_rule_slots(document, node))
+			break;
+		ignore_class_modifiers = false;
+		/* The rule set has changed. If any of the rules now matched modify
+		 * the class attribute, we must match again. */
+		unsigned quota = num_visited;
+		for (unsigned i = 0; i < node->num_matched_rules; ++i) {
+			const Rule *rule = node->rule_slots[i].rule;
+			if ((rule->flags & RFLAG_MODIFIES_CLASS) == 0)
+				continue;
+			unsigned j;
+			for (j = 0; j < num_visited; ++j)
+				if (visited[j] == rule)
+					break;
+			if (j == num_visited) {
+				if (num_visited == MAX_VISITED) {
+					node->flags &= ~NFLAG_UPDATE_RULE_KEYS;
+					break;
+				}
+				visited[num_visited++] = rule;
+				node->flags |= NFLAG_UPDATE_RULE_KEYS;
+			} else {
+				quota--;
+			}
+		}
+		/* If there are class-changing rules in the visited set that are no
+		 * longer matched, we have a cycle, so give up. */
+		if (quota != 0)
+			break;
+	} while ((node->flags & NFLAG_UPDATE_RULE_KEYS) != 0);
 }
 
 /* Builds a LayerPosition structure by reading background attributes. */
@@ -1238,44 +1368,6 @@ static void update_selection_layers(Document *document, Node *node)
 		set_node_flags(document, node, NFLAG_UPDATE_SELECTION_LAYERS, false);
 		set_node_flags(document, node, NFLAG_UPDATE_BOX_LAYERS, true);
 	}
-}
-
-/* Rebuilds a node's array of matched rule references. */
-static void update_rule_slots(Document *document, Node *node)
-{
-	const Rule *matched[NUM_RULE_SLOTS];
-	unsigned num_matched = match_rules(document, node, 
-		matched, NUM_RULE_SLOTS, &document->rules, 
-		&document->system->global_rules);
-	bool changed = num_matched != node->num_matched_rules;
-	unsigned i;
-	for (i = 0; i < num_matched; ++i) {
-		RuleSlot *slot = node->rule_slots + i;
-		if (i >= node->num_matched_rules || slot->rule != matched[i]) {
-			slot->rule = matched[i];
-			slot->revision = slot->rule->revision - 1;
-			changed = true;
-		}
-	}
-	node->num_matched_rules = (uint8_t)num_matched;
-	node->flags &= ~NFLAG_UPDATE_MATCHED_RULES;
-	if (changed) 
-		node->flags |= NFLAG_COMPUTE_ATTRIBUTES | NFLAG_UPDATE_STYLE;
-}
-
-static void check_rule_slots(Document *document, Node *node)
-{
-	document;
-	bool rules_changed = false;
-	for (unsigned i = 0; i < node->num_matched_rules; ++i) {
-		RuleSlot *slot = node->rule_slots + i;
-		if (slot->revision != slot->rule->revision) {
-			slot->revision = slot->rule->revision;
-			rules_changed = true;
-		}
-	}
-	if (rules_changed)
-		node->flags |= NFLAG_COMPUTE_ATTRIBUTES | NFLAG_UPDATE_STYLE;
 }
 
 /* True if a node permits interaction. */
@@ -1547,11 +1639,7 @@ void set_interaction_state(Document *document, Node *node,
 	/* Interation bits cause pseudo-classes to appear and disappear on the
 	 * node. This might result in the node or any of its children matching
 	 * different rules. */
-	/* FIXME (TJM): cleverer way to do this. maybe a NFLAG_CLASSES_CHANGED
-	 * bit that we could propagate down and use to set NFLAG_UPDATE_MATCHED
-	 * rules on children in the pre-layout pass. */
-	for (Node *n = node; n != NULL; n = (Node *)tree_next(document, node, n))
-		n->flags |= NFLAG_UPDATE_RULE_KEYS | NFLAG_UPDATE_MATCHED_RULES;
+	node->flags |= NFLAG_UPDATE_RULE_KEYS | NFLAG_UPDATE_MATCHED_RULES;
 	document->change_clock++;
 }
 
@@ -1620,14 +1708,15 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 	node->flags |= propagate_down;
 
 	update_node_debug_string(document, node);
-	
-	if ((node->flags & NFLAG_UPDATE_RULE_KEYS) != 0) {
-		update_node_rule_keys(document, node);
-		node->flags |= NFLAG_UPDATE_MATCHED_RULES;
-	}
 
-	if (rule_tables_changed || (node->flags & NFLAG_UPDATE_MATCHED_RULES) != 0)
-		update_rule_slots(document, node);
+	if (rule_tables_changed)
+		node->flags |= NFLAG_UPDATE_MATCHED_RULES;
+	if ((node->flags & (NFLAG_UPDATE_RULE_KEYS | 
+		NFLAG_UPDATE_MATCHED_RULES)) != 0) {
+		update_matched_rules(document, node);
+		node->flags |= NFLAG_UPDATE_MATCHED_RULES;
+		propagate_down |= NFLAG_UPDATE_MATCHED_RULES;
+	}
 	check_rule_slots(document, node);
 
 	if ((node->flags & NFLAG_PARENT_CHANGED) != 0) {

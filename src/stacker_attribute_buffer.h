@@ -34,6 +34,9 @@ AttributeSemantic attribute_semantic(int name_token);
 AttributeStorage attribute_storage_type(AttributeSemantic semantic, int mode);
 ValueSemantic value_semantic(int token);
 
+int parse_string_list(const char *s, int length, char *buffer, 
+	unsigned buffer_size);
+
 void abuf_init(AttributeBuffer *abuf, void *storage = 0, 
 	unsigned storage_size = 0);
 void abuf_clear(AttributeBuffer *abuf);
