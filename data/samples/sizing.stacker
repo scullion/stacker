@@ -1,0 +1,10 @@
+<vbox width=128>
+	<p width=25%></p>
+	<hbox height=auto>
+		<hbox width=16 pad-right=8></hbox>
+		<hbox width=16 pad-right=8></hbox>
+		<hbox width=16 height=10></hbox>
+	</hbox>
+	<hbox height=32></hbox>
+	<hbox height=32></hbox>
+</vbox>

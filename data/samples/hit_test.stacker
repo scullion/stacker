@@ -1,0 +1,2 @@
+<rule match="a:highlighted" bold=true color=rgb(255, 64, 0) />
+<p>Here's a link: <a url="www.google.com">click me!</a>. Click it if you want to.</p>

@@ -1,0 +1,115 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros">
+    <ConfigurationSlug Condition="$(ConfigurationSlug)==''">$(Configuration.ToLowerInvariant())</ConfigurationSlug>
+    <RootDir>$(SolutionDir)../</RootDir>
+    <OutputDir>$(RootDir)output/</OutputDir>
+    <LibDir>$(RootDir)lib/</LibDir>
+    <DepsDir>$(RootDir)deps/</DepsDir>
+    <IntermediateDir>$(OutputDir)intermediate/</IntermediateDir>
+    <OutputBinDir>$(OutputDir)bin/</OutputBinDir>
+    <OutputLibDir>$(OutputDir)lib/</OutputLibDir>
+    <BuildLogDir>$(OutputDir)logs/</BuildLogDir>
+    <ProjectSlug>$(ProjectName.ToLowerInvariant())</ProjectSlug>
+    <SolutionSlug>$(SolutionName.ToLowerInvariant())</SolutionSlug>
+    <SolutionConfigurationSlug>$(SolutionSlug)_$(ConfigurationSlug)</SolutionConfigurationSlug>
+    <TargetSlug>$(ProjectSlug)_$(ConfigurationSlug)</TargetSlug>
+    <ConfigurationBinDir>$(OutputBinDir)$(SolutionConfigurationSlug)/</ConfigurationBinDir>
+    <ConfigurationLibDir>$(OutputLibDir)$(SolutionConfigurationSlug)/</ConfigurationLibDir>
+    <ConfigurationIntermediateDir>$(IntermediateDir)$(SolutionConfigurationSlug)/</ConfigurationIntermediateDir>
+    <ProjectIntermediateDir>$(ConfigurationIntermediateDir)$(ProjectSlug)/</ProjectIntermediateDir>
+    <TargetBinDir>$(ConfigurationBinDir)</TargetBinDir>
+    <TargetLibDir>$(ConfigurationLibDir)</TargetLibDir>
+    <SymbolDir>$(RootDir)symbols/</SymbolDir>
+    <SymbolArchiveDir>$(SymbolDir)archive/</SymbolArchiveDir>
+    <SymbolIntermediateDir>$(ConfigurationIntermediateDir)symbols/</SymbolIntermediateDir>
+  </PropertyGroup>
+  <PropertyGroup>
+    <OutDir>$(TargetBinDir)</OutDir>
+    <OutDir Condition="$(ConfigurationType)=='StaticLibrary'">$(TargetLibDir)</OutDir>
+    <IntDir>$(ProjectIntermediateDir)</IntDir>
+    <TargetName>$(TargetSlug)</TargetName>
+    <BuildLogFile>$(BuildLogDir)$(TargetSlug).log</BuildLogFile>
+    <_PropertySheetDisplayName>shared</_PropertySheetDisplayName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_SCL_SECURE_NO_WARNINGS;STACKER_WIN32;STACKER_DIRECT2D;STACKER_IDE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(TargetDir)$(TargetSlug).pdb</ProgramDatabaseFile>
+      <AdditionalManifestDependencies>"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"</AdditionalManifestDependencies>
+      <AdditionalDependencies>comctl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <BuildMacro Include="RootDir">
+      <Value>$(RootDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="OutputDir">
+      <Value>$(OutputDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="LibDir">
+      <Value>$(LibDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="DepsDir">
+      <Value>$(DepsDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="IntermediateDir">
+      <Value>$(IntermediateDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="OutputBinDir">
+      <Value>$(OutputBinDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="OutputLibDir">
+      <Value>$(OutputLibDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="BuildLogDir">
+      <Value>$(BuildLogDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="ProjectSlug">
+      <Value>$(ProjectSlug)</Value>
+    </BuildMacro>
+    <BuildMacro Include="SolutionSlug">
+      <Value>$(SolutionSlug)</Value>
+    </BuildMacro>
+    <BuildMacro Include="SolutionConfigurationSlug">
+      <Value>$(SolutionConfigurationSlug)</Value>
+    </BuildMacro>
+    <BuildMacro Include="TargetSlug">
+      <Value>$(TargetSlug)</Value>
+    </BuildMacro>
+    <BuildMacro Include="ConfigurationBinDir">
+      <Value>$(ConfigurationBinDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="ConfigurationLibDir">
+      <Value>$(ConfigurationLibDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="ConfigurationIntermediateDir">
+      <Value>$(ConfigurationIntermediateDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="ProjectIntermediateDir">
+      <Value>$(ProjectIntermediateDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="TargetBinDir">
+      <Value>$(TargetBinDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="TargetLibDir">
+      <Value>$(TargetLibDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="SymbolDir">
+      <Value>$(SymbolDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="SymbolArchiveDir">
+      <Value>$(SymbolArchiveDir)</Value>
+    </BuildMacro>
+    <BuildMacro Include="SymbolIntermediateDir">
+      <Value>$(SymbolIntermediateDir)</Value>
+    </BuildMacro>
+  </ItemGroup>
+</Project>

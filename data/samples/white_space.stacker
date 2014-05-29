@@ -1,0 +1,46 @@
+<code>
+/* Computes a list of places to break a paragraph into lines. This is a simple 
+ * implementation of the Knuth-Plass optimal fit algorithm [1].
+ * 
+ * [1] Knuth, D.E. & Plass, M.F. (1981). Breaking Paragraphs into Lines. 
+ *     Software - Practice and Experience, Vol. 11, 1119-1184.
+ */
+static unsigned determine_breakpoints(const Paragraph *p, ParagraphLine *lines)
+{
+        /* Places the paragraph could be broken. */
+        struct Breakpoint {
+                int b;
+                int next_box;
+                int predecessor;
+                float debug_demerits;
+                float total_demerits;
+                unsigned unscaled_width;
+                float adjustment_ratio;
+        } breakpoints[MAX_PARAGRAPH_ELEMENTS + 1];
+        unsigned num_breakpoints = 0;
+
+        /* Candidate line starts. */
+        struct ActiveBreakpoint {
+                int offset;
+                int width;
+                int stretch;
+                int shrink;
+                int penalty;
+        } active[MAX_ACTIVE_BREAKPOINTS];
+        unsigned num_active = 0;
+
+        /* Breakpoints that will become active at the next box. */
+        int preactive[MAX_ACTIVE_BREAKPOINTS];
+        unsigned num_preactive = 0;
+
+        /* Start with one pre-active breakpoint before the first element. */
+        preactive[num_preactive++] = 0;
+        breakpoints[0].b = 0;
+        breakpoints[0].next_box = -1;
+        breakpoints[0].predecessor = -1;
+        breakpoints[0].total_demerits = 0.0f;
+        num_breakpoints = 1;
+}
+</code>
+<rule match="code" white-space=preserve font="Consolas" font-size=12 color=rgb(0, 255, 0) />
+<rule match="document" background=rgb(0,0,0)/>

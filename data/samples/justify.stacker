@@ -1,0 +1,29 @@
+<rule match="document" font="Segoe UI" color=rgb(255, 255, 255) background=rgb(32, 32, 32) />
+<rule match="p" width=200 font-size=12 pad=10/>
+
+<hbox>
+	<p justify=left>
+		Flower forget-me-nots between the stones paving this grave ground. 
+		Here's honest rot To unpick the heart, pare bone free of the fictive vein. 
+		When one stark skeleton bulks real, all saints' tongues fall quiet: 
+		flies watch no resurrections in the sun.
+	</p>
+	<p justify=right>
+		Flower forget-me-nots between the stones paving this grave ground. 
+		Here's honest rot To unpick the heart, pare bone free of the fictive vein. 
+		When one stark skeleton bulks real, all saints' tongues fall quiet: 
+		flies watch no resurrections in the sun.
+	</p>
+	<p justify=center>
+		Flower forget-me-nots between the stones paving this grave ground. 
+		Here's honest rot To unpick the heart, pare bone free of the fictive vein. 
+		When one stark skeleton bulks real, all saints' tongues fall quiet: 
+		flies watch no resurrections in the sun.
+	</p>
+	<p justify=flush>
+		Flower forget-me-nots between the stones paving this grave ground. 
+		Here's honest rot To unpick the heart, pare bone free of the fictive vein. 
+		When one stark skeleton bulks real, all saints' tongues fall quiet: 
+		flies watch no resurrections in the sun.
+	</p>
+</hbox>

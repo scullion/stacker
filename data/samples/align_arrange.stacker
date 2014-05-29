@@ -1,0 +1,69 @@
+<hbox>
+
+	<vbox>
+		<hbox pad-top=20 pad-left=20 pad-right=20 pad-bottom=20 height=120 width=500 arrange=start>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+		</hbox>
+
+		<hbox pad-top=20 pad-left=20 pad-right=20 pad-bottom=20 height=120 width=500 arrange=middle>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+		</hbox>
+
+
+		<hbox pad-top=20 pad-left=20 pad-right=20 pad-bottom=20 height=120 width=500 arrange=end>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+		</hbox>
+	</vbox>
+
+	<hbox>
+		<vbox pad-top=20 pad-left=20 pad-right=20 pad-bottom=20 height=500 width=120 arrange=start>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+		</vbox>
+
+		<vbox pad-top=20 pad-left=20 pad-right=20 pad-bottom=20 height=500 width=120 arrange=middle>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+		</vbox>
+
+
+		<vbox pad-top=20 pad-left=20 pad-right=20 pad-bottom=20 height=500 width=120 arrange=end>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=start></hbox>
+			<hbox width=40 height=40 align=middle></hbox>
+			<hbox width=40 height=40 align=end></hbox>
+		</vbox>
+	</hbox>
+
+</hbox>

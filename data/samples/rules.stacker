@@ -1,0 +1,6 @@
+<rule match=".container p.a.horse" bold=true />
+<vbox class="container">
+	<p class="dog, a, horse, b">Hi there.</p>
+	<p class="dog, a, cow, b">Hi there.</p>
+</vbox>
+<p class="dog, a, horse, b">Hi there.</p>

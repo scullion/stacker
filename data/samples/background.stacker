@@ -1,0 +1,11 @@
+<rule match="a.image-link:highlighted" color=rgb(224, 160, 64) bold=true />
+<rule match="a.image-link vbox" background=url("stacker://ide/images/smile32.png") />
+<rule match="a.image-link:highlighted vbox" background=url("stacker://ide/images/cool32.png") />
+
+
+<p><a class="image-link" url="www.google.com">A box: <vbox></vbox> there.</a></p>
+<p><a class="image-link" url="www.google.com">A box: <vbox></vbox> there.</a></p>
+<p><a class="image-link" url="www.google.com">A box: <vbox></vbox> there.</a></p>
+<p><a class="image-link" url="www.google.com">A box: <vbox></vbox> there.</a></p>
+<p><a class="image-link" url="www.google.com">A box: <vbox></vbox> there.</a></p>
+<p><a class="image-link" url="www.google.com">A box: <vbox></vbox> there.</a></p>

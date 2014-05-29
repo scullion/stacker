@@ -1,0 +1,203 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="src">
+      <UniqueIdentifier>{6a98810d-c580-46b4-b709-65c914c7cc95}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="data">
+      <UniqueIdentifier>{523fab65-4dfc-44ee-827d-e17db7343531}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\src\stb_image.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\url_cache.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_document.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_box.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_rule.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_util.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_ide.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_parser.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_attribute.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_layer.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_node.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_quadtree.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_token.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_system.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_inline.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_message.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_view.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_gdi.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_paragraph.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_diagnostics.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_api.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_style.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\src\url_cache.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_document.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_box.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_rule.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_util.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_shared.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_parser.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_attribute.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_layer.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_node.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_quadtree.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_system.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_token.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_inline.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_message.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_view.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_diagnostics.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_paragraph.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_platform.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_style.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_gdi.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_ide_resource.h">
+      <Filter>src</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\data\complex.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\knuth.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\sizing.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\text.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\padding.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\align_arrange.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\rules.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\background.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\text_styling.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\justify.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\columns.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\platypus.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\chat.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\hit_test.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\white_space.boxes">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\columns.boxes" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\src\stacker_ide.rc">
+      <Filter>src</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+</Project>

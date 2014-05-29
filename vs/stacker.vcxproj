@@ -1,0 +1,171 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="debug|Win32">
+      <Configuration>debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="optimized|Win32">
+      <Configuration>optimized</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\src\stacker_attribute_buffer.cpp" />
+    <ClCompile Include="..\src\stacker_box.cpp" />
+    <ClCompile Include="..\src\stacker_diagnostics.cpp" />
+    <ClCompile Include="..\src\stacker_document.cpp" />
+    <ClCompile Include="..\src\stacker_direct2d.cpp" />
+    <ClCompile Include="..\src\stacker_gdi.cpp" />
+    <ClCompile Include="..\src\stacker_ide.cpp" />
+    <ClCompile Include="..\src\stacker_inline.cpp" />
+    <ClCompile Include="..\src\stacker_layer.cpp" />
+    <ClCompile Include="..\src\stacker_message.cpp" />
+    <ClCompile Include="..\src\stacker_node.cpp" />
+    <ClCompile Include="..\src\stacker_paragraph.cpp" />
+    <ClCompile Include="..\src\stacker_parser.cpp" />
+    <ClCompile Include="..\src\stacker_quadtree.cpp" />
+    <ClCompile Include="..\src\stacker_rule.cpp" />
+    <ClCompile Include="..\src\stacker_style.cpp" />
+    <ClCompile Include="..\src\stacker_system.cpp" />
+    <ClCompile Include="..\src\stacker_token.cpp" />
+    <ClCompile Include="..\src\stacker_util.cpp" />
+    <ClCompile Include="..\src\stacker_view.cpp" />
+    <ClCompile Include="..\src\stacker_win32.cpp" />
+    <ClCompile Include="..\src\stb_image.c" />
+    <ClCompile Include="..\src\text_template.cpp" />
+    <ClCompile Include="..\src\url_cache.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\src\stacker_attribute_buffer.h" />
+    <ClInclude Include="..\src\stacker_gdi.h" />
+    <ClInclude Include="..\src\stacker_ide_resource.h" />
+    <ClInclude Include="..\src\stacker.h" />
+    <ClInclude Include="..\src\stacker_attribute.h" />
+    <ClInclude Include="..\src\stacker_box.h" />
+    <ClInclude Include="..\src\stacker_diagnostics.h" />
+    <ClInclude Include="..\src\stacker_document.h" />
+    <ClInclude Include="..\src\stacker_direct2d.h" />
+    <ClInclude Include="..\src\stacker_platform.h" />
+    <ClInclude Include="..\src\stacker_inline.h" />
+    <ClInclude Include="..\src\stacker_layer.h" />
+    <ClInclude Include="..\src\stacker_message.h" />
+    <ClInclude Include="..\src\stacker_node.h" />
+    <ClInclude Include="..\src\stacker_paragraph.h" />
+    <ClInclude Include="..\src\stacker_parser.h" />
+    <ClInclude Include="..\src\stacker_quadtree.h" />
+    <ClInclude Include="..\src\stacker_rule.h" />
+    <ClInclude Include="..\src\stacker_shared.h" />
+    <ClInclude Include="..\src\stacker_style.h" />
+    <ClInclude Include="..\src\stacker_system.h" />
+    <ClInclude Include="..\src\stacker_token.h" />
+    <ClInclude Include="..\src\stacker_util.h" />
+    <ClInclude Include="..\src\stacker_view.h" />
+    <ClInclude Include="..\src\text_template.h" />
+    <ClInclude Include="..\src\url_cache.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\src\stacker_ide.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\deps\libcurl\libcurl.vcxproj">
+      <Project>{179783de-ab44-452d-8071-d19c3027a7a1}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\deps\scintilla\scintilla.vcxproj">
+      <Project>{c1352d75-3f7a-4c82-be73-17eb312d4a54}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\data\samples\align_arrange.stacker" />
+    <None Include="..\data\samples\background.stacker" />
+    <None Include="..\data\samples\bugs.stacker" />
+    <None Include="..\data\samples\chat.stacker" />
+    <None Include="..\data\samples\clipping.stacker" />
+    <None Include="..\data\samples\columns.stacker" />
+    <None Include="..\data\samples\complex.stacker" />
+    <None Include="..\data\samples\hit_test.stacker" />
+    <None Include="..\data\samples\justify.stacker" />
+    <None Include="..\data\samples\knuth.stacker" />
+    <None Include="..\data\samples\layout.stacker" />
+    <None Include="..\data\samples\padding.stacker" />
+    <None Include="..\data\samples\platypus.stacker" />
+    <None Include="..\data\samples\rules.stacker" />
+    <None Include="..\data\samples\sizing.stacker" />
+    <None Include="..\data\samples\text.stacker" />
+    <None Include="..\data\samples\text_styling.stacker" />
+    <None Include="..\data\samples\white_space.stacker" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{28F0D096-C484-42AF-A6ED-A17D538E81D4}</ProjectGuid>
+    <RootNamespace>stacker</RootNamespace>
+    <ProjectName>stacker</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='optimized|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="props\config_debug.props" />
+    <Import Project="..\deps\libcurl\using_libcurl.props" />
+    <Import Project="props\using_d3d11.props" />
+    <Import Project="..\deps\scintilla\using_scintilla.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='optimized|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="props\config_optimized.props" />
+    <Import Project="..\deps\libcurl\using_libcurl.props" />
+    <Import Project="props\using_d3d11.props" />
+    <Import Project="..\deps\scintilla\using_scintilla.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="props\config_optimized.props" />
+    <Import Project="props\config_optimized.props" />
+    <Import Project="props\shared.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='optimized|Win32'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <Profile>false</Profile>
+    </Link>
+  </ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
