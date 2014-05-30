@@ -200,7 +200,9 @@ const unsigned MAX_SELECTOR_KEYS          = MAX_SELECTOR_CLAUSES * MAX_SELECTOR_
 
 /* A special priority threshold which causes attributes of a rule to override 
  * even those of the node against which it is matched. */
-const int RULE_PRIORITY_OVERRIDE = -64;
+const int RULE_PRIORITY_OVERRIDE =  -64;
+const int RULE_PRIORITY_LOWEST   =  127;
+const int RULE_PRIORITY_HIGHEST  = -128;
 
 /* Rule priority keys contain the user-supplied priority in the upper 8 bits
  * and the document order in the lower bits. */

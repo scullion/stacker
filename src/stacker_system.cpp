@@ -1,6 +1,7 @@
 #include "stacker_system.h"
 
 #include "stacker_shared.h"
+#include "stacker_attribute_buffer.h"
 #include "stacker_util.h"
 #include "stacker_platform.h"
 #include "stacker_document.h"
@@ -121,6 +122,71 @@ static void make_built_in_rule_names(System *system)
 	}
 }
 
+static AttributeAssignment make_assignment(Token name, int value, 
+	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET)
+{
+	AttributeAssignment assignment;
+	assignment.name = name;
+	assignment.op = op;
+	variant_set_integer(&assignment.value, value, vs);
+	return assignment;
+}
+
+static AttributeAssignment make_assignment(Token name, unsigned value, 
+	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET)
+{
+	AttributeAssignment assignment;
+	assignment.name = name;
+	assignment.op = op;
+	variant_set_integer(&assignment.value, value, vs);
+	return assignment;
+}
+
+static AttributeAssignment make_assignment(Token name, float value, 
+	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET)
+{
+	AttributeAssignment assignment;
+	assignment.name = name;
+	assignment.op = op;
+	variant_set_float(&assignment.value, value, vs);
+	return assignment;
+}
+
+static AttributeAssignment make_assignment(Token name, const char *value,
+	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET)
+{
+	AttributeAssignment assignment;
+	assignment.name = name;
+	assignment.op = op;
+	variant_set_string(&assignment.value, value, vs);
+	return assignment;
+}
+
+static void add_default_rules(System *system)
+{
+	static const unsigned MAX_ROOT_ATTRIBUTES = 32;
+
+	AttributeAssignment attributes[MAX_ROOT_ATTRIBUTES];
+	unsigned count = 0;
+	
+	attributes[count++] = make_assignment(TOKEN_COLOR, DEFAULT_TEXT_COLOR);
+	attributes[count++] = make_assignment(TOKEN_FONT, DEFAULT_FONT_FACE);
+	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, DEFAULT_FONT_SIZE);
+	attributes[count++] = make_assignment(TOKEN_BOLD, 
+		(DEFAULT_FONT_FLAGS & STYLE_BOLD) != 0, VSEM_BOOLEAN);
+	attributes[count++] = make_assignment(TOKEN_ITALIC, 
+		(DEFAULT_FONT_FLAGS & TOKEN_ITALIC) != 0, VSEM_BOOLEAN);
+	attributes[count++] = make_assignment(TOKEN_UNDERLINE, 
+		(DEFAULT_FONT_FLAGS & STYLE_UNDERLINE) != 0, VSEM_BOOLEAN);
+	attributes[count++] = make_assignment(TOKEN_INDENT, TOKEN_AUTO, VSEM_TOKEN);
+	attributes[count++] = make_assignment(TOKEN_JUSTIFY, TOKEN_LEFT, VSEM_TOKEN);
+	attributes[count++] = make_assignment(TOKEN_WRAP, TOKEN_WORD_WRAP, VSEM_TOKEN);
+	attributes[count++] = make_assignment(TOKEN_WHITE_SPACE, TOKEN_NORMAL, VSEM_TOKEN);
+
+	add_rule(NULL, system, NULL, "document", -1, attributes, count, 
+		RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
+}
+
 static void initialize_url_notifications(System *system, UrlCache *url_cache)
 {
 	if (url_cache != NULL) {
@@ -157,6 +223,7 @@ System *create_system(unsigned flags, BackEnd *back_end, UrlCache *url_cache)
 	initialize_font_cache(system);
 	make_built_in_rule_names(system);
 	initialize_url_notifications(system, url_cache);
+	add_default_rules(system);
 	return system;
 }
 

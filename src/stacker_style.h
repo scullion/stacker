@@ -55,6 +55,7 @@ extern const char * const DEBUG_LABEL_FONT_FACE;
 extern const unsigned DEBUG_LABEL_FONT_SIZE;
 extern const unsigned DEBUG_LABEL_FONT_FLAGS;
 
+const uint32_t DEFAULT_TEXT_COLOR               = 0xFF000000;
 const uint32_t DEFAULT_SELECTED_TEXT_COLOR      = 0xFFFFFFFF;
 const uint32_t DEFAULT_SELECTED_TEXT_FILL_COLOR = 0xC0FF00EA;
 
