@@ -818,24 +818,29 @@ static int abuf_fold(
 /*
  * Attribute Buffers
  */
+
  
-void abuf_init(AttributeBuffer *abuf, void *storage, unsigned storage_size)
+inline BufferEntry *abuf_next_entry(BufferEntry *entry)
 {
-	abuf->buffer = storage_size != 0 ? (char *)storage : NULL;
-	abuf->size = 0;
-	abuf->capacity = -int(storage_size);
-	abuf->num_attributes = 0;
+	return (BufferEntry *)((char *)entry + sizeof(Attribute) + 
+		entry->header.size);
 }
 
-void abuf_clear(AttributeBuffer *abuf)
+inline BufferEntry *abuf_end(AttributeBuffer *abuf)
 {
-	if (abuf->capacity > 0) {
-		delete [] abuf->buffer;
-		abuf->buffer = NULL;
-		abuf->capacity = 0;
+	return (BufferEntry *)(abuf->buffer + abuf->size);
+}
+ 
+/* Returns the number of attributes in the range [start, end). */
+static unsigned count_attributes_between(const BufferEntry *start, 
+	const BufferEntry *end)
+{
+	unsigned count = 0;
+	while (start != end) {
+		start = abuf_next_entry((BufferEntry *)start);
+		count++;
 	}
-	abuf->size = 0;
-	abuf->num_attributes = 0;
+	return count;
 }
 
 static void abuf_reallocate(AttributeBuffer *abuf, unsigned new_size)
@@ -891,7 +896,11 @@ static void abuf_remove_all(AttributeBuffer *abuf, int name)
 	unsigned bytes_removed = 0;
 	while (entry != end) {
 		unsigned entry_size = sizeof(Attribute) + entry->header.size;
-		unsigned gap = (entry->header.name == name) ? entry_size : 0;
+		unsigned gap = 0;
+		if (entry->header.name == name) {
+			gap = entry_size;
+			abuf->num_attributes--;
+		}
 		memmove((char *)entry - bytes_removed, entry, entry_size);
 		entry = (BufferEntry *)((char *)entry + entry_size);
 		bytes_removed += gap;
@@ -941,15 +950,23 @@ static BufferEntry *abuf_resize_entry(AttributeBuffer *abuf,
 	return entry;
 }
 
-inline BufferEntry *abuf_next_entry(BufferEntry *entry)
+void abuf_init(AttributeBuffer *abuf, void *storage, unsigned storage_size)
 {
-	return (BufferEntry *)((char *)entry + sizeof(Attribute) + 
-		entry->header.size);
+	abuf->buffer = storage_size != 0 ? (char *)storage : NULL;
+	abuf->size = 0;
+	abuf->capacity = -int(storage_size);
+	abuf->num_attributes = 0;
 }
 
-inline BufferEntry *abuf_end(AttributeBuffer *abuf)
+void abuf_clear(AttributeBuffer *abuf)
 {
-	return (BufferEntry *)(abuf->buffer + abuf->size);
+	if (abuf->capacity > 0) {
+		delete [] abuf->buffer;
+		abuf->buffer = NULL;
+		abuf->capacity = 0;
+	}
+	abuf->size = 0;
+	abuf->num_attributes = 0;
 }
 
 const Attribute *abuf_first(const AttributeBuffer *abuf)
@@ -975,6 +992,7 @@ Attribute *abuf_append(AttributeBuffer *abuf, const Attribute *attribute)
 	abuf_reallocate(abuf, abuf->size + attr_size);
 	BufferEntry *dest = (BufferEntry *)(abuf->buffer + abuf->size - attr_size);
 	memcpy(dest, attribute, attr_size);
+	abuf->num_attributes++;
 	return &dest->header;
 }
 
@@ -985,6 +1003,7 @@ Attribute *abuf_prepend(AttributeBuffer *abuf, const Attribute *attribute)
 	abuf_reallocate(abuf, abuf->size + attr_size);
 	memmove(abuf->buffer + attr_size, abuf->buffer, abuf->size - attr_size);
 	memcpy(abuf->buffer, attribute, attr_size);
+	abuf->num_attributes++;
 	return (Attribute *)abuf_first(abuf);
 }
 
@@ -1006,17 +1025,28 @@ void abuf_replace_range(AttributeBuffer *abuf, const Attribute *start,
 {
 	if (end == NULL)
 		end = (const Attribute *)abuf_end(abuf);
+	
 	unsigned old_start = (char *)start - abuf->buffer;
 	unsigned old_end = (char *)end - abuf->buffer;
 	unsigned old_range_size = old_end - old_start;
 	unsigned old_size = abuf->size;
-	unsigned new_range_size = source != NULL ? source->size : 0;
+	
+	abuf->num_attributes -= count_attributes_between(
+		(const BufferEntry *)start, 
+		(const BufferEntry *)end);
+	unsigned new_range_size = 0;
+	if (source != NULL) {
+		new_range_size = source->size;
+		abuf->num_attributes += source->num_attributes;
+	}
 	unsigned new_end = old_start + new_range_size;
 	unsigned new_size = abuf->size + new_range_size - old_range_size;
+
 	abuf_reallocate(abuf, new_size);
 	memmove(abuf->buffer + new_end, abuf->buffer + old_end, old_size - old_end);
 	if (new_range_size != 0)
 		memcpy(abuf->buffer + old_start, source->buffer, new_range_size);
+	
 }
 
 /* Casts a numeric attribute to an integer. */
