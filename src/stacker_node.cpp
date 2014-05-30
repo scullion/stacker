@@ -1067,14 +1067,6 @@ void set_node_flags(Document *document, Node *node, unsigned mask, bool value)
 		document->change_clock++;
 }
 
-/* Sets or clears node flags without disturbing the change clock. */
-void set_node_flags_internal(Document *document, Node *node, 
-	unsigned mask, bool value)
-{
-	document;
-	node->flags = set_or_clear(node->flags, mask, value);
-}
-
 /* Creates a new layer of the specified types and adds it to the node's layer
  * stack. */
 static VisualLayer *add_node_layer(Document *document, Node *node, 
@@ -1365,8 +1357,8 @@ static void update_selection_layers(Document *document, Node *node)
 {
 	if (node->layout == LCTX_INLINE_CONTAINER) {
 		update_inline_selection_layers(document, node);
-		set_node_flags(document, node, NFLAG_UPDATE_SELECTION_LAYERS, false);
-		set_node_flags(document, node, NFLAG_UPDATE_BOX_LAYERS, true);
+		node->flags &= ~NFLAG_UPDATE_SELECTION_LAYERS;
+		node->flags |= NFLAG_UPDATE_BOX_LAYERS;
 	}
 }
 
@@ -1887,8 +1879,7 @@ void do_text_layout(Document *document, Node *node)
 	 * changes. */
 	container_box->flags |= BOXFLAG_PARAGRAPH_VALID;
 	if ((node->flags & NFLAG_IN_SELECTION_CHAIN) != 0)
-		set_node_flags_internal(document, node, 
-			NFLAG_UPDATE_SELECTION_LAYERS, true);
+		node->flags |= NFLAG_UPDATE_SELECTION_LAYERS;
 }
 
 /* Iteratively computes box sizes. */

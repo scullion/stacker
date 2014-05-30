@@ -153,9 +153,8 @@ static void clear_selection_chain(Document *document)
 		next = node->selection_next;
 		node->selection_prev = NULL;
 		node->selection_next = NULL;
-		set_node_flags(document, node, NFLAG_IN_SELECTION_CHAIN, false);
-		set_node_flags(document, node, NFLAG_UPDATE_SELECTION_LAYERS | 
-			NFLAG_UPDATE_TEXT_LAYERS, true);
+		node->flags &= ~NFLAG_IN_SELECTION_CHAIN;
+		node->flags |= NFLAG_UPDATE_SELECTION_LAYERS | NFLAG_UPDATE_TEXT_LAYERS;
 	}
 	document->selection_chain_head = NULL;
 	document->selection_chain_tail = NULL;
@@ -613,13 +612,13 @@ void update_document(Document *document)
 	compute_box_bounds(document, root->box);
 	lmsg("End bounds pass.\n\n");
 
-	lmsg("\nBegin depth pass.\n");
-	update_box_clip(document, root->box, INFINITE_RECTANGLE, 0);
-	lmsg("End depth pass.\n\n");
-
 	lmsg("\nBegin post-layout node update.\n");
 	update_nodes_post_layout(document, root);
 	lmsg("\nEnd post-layout node update.\n");
+
+	lmsg("\nBegin depth pass.\n");
+	update_box_clip(document, root->box, INFINITE_RECTANGLE, 0);
+	lmsg("End depth pass.\n\n");
 
 	lmsg("End layout.\n\n");
 

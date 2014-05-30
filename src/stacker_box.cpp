@@ -762,8 +762,8 @@ inline bool set_box_position(Document *document, Box *box, float a, float b,
 		 * the node needs to rebuild visual layers that depend on the document 
 		 * position of its box. */
 		if (box->owner != NULL && box == get_box(box->owner))
-			set_node_flags_internal(document, box->owner, 
-				NFLAG_UPDATE_TEXT_LAYERS | NFLAG_UPDATE_BOX_LAYERS, true);
+			box->owner->flags |= NFLAG_UPDATE_TEXT_LAYERS | 
+				NFLAG_UPDATE_BOX_LAYERS;
 	}
 	return changed;
 }
