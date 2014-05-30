@@ -31,7 +31,6 @@ extern const char * const STORAGE_STRINGS[NUM_ATTRIBUTE_TYPES];
 
 int token_to_attribute_operator(int token);
 AttributeSemantic attribute_semantic(int name_token);
-AttributeStorage attribute_storage_type(AttributeSemantic semantic, int mode);
 ValueSemantic value_semantic(int token);
 
 int parse_string_list(const char *s, int length, char *buffer, 

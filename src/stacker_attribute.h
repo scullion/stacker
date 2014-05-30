@@ -63,7 +63,7 @@ enum AttributeOperator {
 	AOP_DIVIDE
 };
 
-/* How an attribute is represented inside an attribute heap. */
+/* How an attribute is represented inside an attribute buffer. */
 enum AttributeStorage {
 	STORAGE_INVALID = -1,
 
@@ -74,6 +74,18 @@ enum AttributeStorage {
 	STORAGE_STRING,
 
 	NUM_ATTRIBUTE_TYPES
+};
+
+/* Bits indicating permitted storage types for a (semantic, mode) pair. */
+enum AttributeStorageBit {
+	STORAGE_BIT_NONE     = 1 << STORAGE_NONE, 
+	STORAGE_BIT_INT16    = 1 << STORAGE_INT16,
+	STORAGE_BIT_INT32    = 1 << STORAGE_INT32,
+	STORAGE_BIT_FLOAT32  = 1 << STORAGE_FLOAT32,
+	STORAGE_BIT_STRING   = 1 << STORAGE_STRING,
+
+	STORAGE_BIT_INTEGRAL = STORAGE_BIT_INT16 | STORAGE_BIT_INT32,
+	STORAGE_BIT_NUMERIC  = STORAGE_BIT_INTEGRAL | STORAGE_BIT_FLOAT32
 };
 
 /* How to represent a string set when it is read as a string. */

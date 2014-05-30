@@ -151,28 +151,29 @@ AttributeSemantic attribute_semantic(int name_token)
 	return ASEM_INVALID;
 }
 
-/* Returns the storage type required for a particular attribute type in the
- * specified mode. */
-AttributeStorage attribute_storage_type(AttributeSemantic semantic, int mode)
+/* Returns a mask of the storage types permitted for a (semantic, mode) 
+ * combination. */
+static unsigned storage_mask(AttributeSemantic semantic, int mode)
 {
 	switch (semantic) {
 		case ASEM_DIMENSON:
 		case ASEM_ABSOLUTE_DIMENSION:
-			return STORAGE_INT16;
+			return STORAGE_BIT_NUMERIC;
 		case ASEM_REAL:
-			return STORAGE_FLOAT32;
+			return STORAGE_BIT_FLOAT32;
 		case ASEM_STRING:
 		case ASEM_STRING_SET:
 		case ASEM_URL:
-			return mode != ADEF_UNDEFINED ? STORAGE_STRING : STORAGE_NONE;
+			return mode != ADEF_UNDEFINED ? STORAGE_BIT_STRING : 
+				STORAGE_BIT_NONE;
 		case ASEM_BACKGROUND:
 			if (mode == BGMODE_URL)
-				return STORAGE_STRING;
+				return STORAGE_BIT_STRING;
 			if (mode == BGMODE_COLOR)
-				return STORAGE_INT32;
-			return STORAGE_NONE;
+				return STORAGE_BIT_INT32;
+			return STORAGE_BIT_NONE;
 		case ASEM_COLOR:
-			return STORAGE_INT32;
+			return STORAGE_BIT_INT32;
 		case ASEM_FLAG:
 		case ASEM_ALIGNMENT:
 		case ASEM_JUSTIFICATION:
@@ -183,7 +184,7 @@ AttributeStorage attribute_storage_type(AttributeSemantic semantic, int mode)
 		case ASEM_BOUNDING_BOX:
 		case ASEM_CURSOR:
 		case ASEM_EDGES:
-			return STORAGE_NONE;
+			return STORAGE_BIT_NONE;
 	}
 	ensure(false);
 	return STORAGE_NONE;
@@ -590,8 +591,26 @@ static int validate_integer(int name, ValueSemantic vs, int value,
 	if (mode < 0)
 		return mode;
 
+	/* Choose the smallest storage type that can represent the value without
+	 * loss of information, or, failing that, the widest permitted type. */
+	unsigned permitted_types = storage_mask(as, mode);
+	if ((permitted_types & STORAGE_BIT_INT16) != 0 &&
+		value >= SHRT_MIN && value <= SHRT_MAX) {
+		result->storage = STORAGE_INT16;
+	} else if ((permitted_types & STORAGE_BIT_INT32) != 0) {
+		result->storage = STORAGE_INT32;
+	} else if ((permitted_types & STORAGE_BIT_FLOAT32) != 0) {
+		result->storage = STORAGE_FLOAT32;
+	} else if ((permitted_types & STORAGE_BIT_INT16) != 0) {
+		result->storage = STORAGE_INT16;
+	} else if ((permitted_types & STORAGE_BIT_NONE) != 0) {
+		result->storage = STORAGE_NONE;
+	} else {
+		assertb(false);
+		return 0;
+	}
+
 	/* Convert the value to its storage type. */
-	result->storage = attribute_storage_type(as, mode);
 	switch (result->storage) {
 		case STORAGE_NONE:
 			result->size = 0;
@@ -653,10 +672,24 @@ static int validate_float(int name, ValueSemantic vs, float value,
 	if (mode < 0)
 		return mode;
 
+	/* Choose the widest numeric type permitted. */
+	unsigned permitted_types = storage_mask(as, mode);
+	if ((permitted_types & STORAGE_BIT_FLOAT32) != 0) {
+		result->storage = STORAGE_FLOAT32;
+	} else if ((permitted_types & STORAGE_BIT_INT32) != 0) {
+		result->storage = STORAGE_INT32;
+	} else if ((permitted_types & STORAGE_BIT_INT16) != 0) {
+		result->storage = STORAGE_INT16;
+	} else if ((permitted_types & STORAGE_BIT_NONE) != 0) {
+		result->storage = STORAGE_NONE;
+	} else {
+		assertb(false);
+		return 0;
+	}
+
 	/* Convert the value to its storage type. */
 	if (vs == VSEM_PERCENTAGE)
 		value *= 1.0f / 100.0f;
-	result->storage = attribute_storage_type(as, mode);
 	switch (result->storage) {
 		case STORAGE_NONE:
 			result->size = 0;
@@ -731,8 +764,18 @@ static int validate_string(int name, ValueSemantic vs,
 	if (mode < 0)
 		return mode;
 
+	/* Choose the storage type. */
+	unsigned permitted_types = storage_mask(as, mode);
+	if ((permitted_types & STORAGE_BIT_STRING) != 0) {
+		result->storage = STORAGE_STRING;
+	} else if ((permitted_types & STORAGE_BIT_NONE) != 0) {
+		result->storage = STORAGE_NONE;
+	} else {
+		assertb(false);
+		return 0;
+	}
+
 	/* Convert the value to storage form if required. */
-	result->storage = attribute_storage_type(as, mode);
 	if (as == ASEM_STRING_SET) {
 		rc = parse_string_list(value, length, result->buffer, 
 			sizeof(result->buffer));
@@ -976,6 +1019,37 @@ void abuf_replace_range(AttributeBuffer *abuf, const Attribute *start,
 		memcpy(abuf->buffer + old_start, source->buffer, new_range_size);
 }
 
+/* Casts a numeric attribute to an integer. */
+static int attribute_as_int(AttributeStorage storage, const AttributeData *data)
+{
+	switch (storage) {
+		case STORAGE_INT16:
+			return (int)data->int16;
+		case STORAGE_INT32:
+			return data->int32;
+		case STORAGE_FLOAT32:
+			return round_signed(data->float32);
+	}
+	assertb(false);
+	return 0;
+}
+
+/* Casts a numeric attribute to a float. */
+static float attribute_as_float(AttributeStorage storage, 
+	const AttributeData *data)
+{
+	switch (storage) {
+		case STORAGE_INT16:
+			return (float)data->int16;
+		case STORAGE_INT32:
+			return (float)data->int32;
+		case STORAGE_FLOAT32:
+			return (float)data->float32;
+	}
+	assertb(false);
+	return 0.0f;
+}
+
 /* Attempts to replace operation A with an operation that does the same thing
  * as A followed by B. Returns a pointer to the modified A if folding occurred,
  * otherwise returns NULL. */
@@ -1063,8 +1137,8 @@ static int abuf_fold(
 			changed = true;
 		}
 	} else if (type_ab == STORAGE_INT16 || type_ab == STORAGE_INT32) {
-		int va = (type_a == STORAGE_INT16) ? ea->data.int16 : ea->data.int32;
-		int vb = (type_b == STORAGE_INT16) ? data_b->int16 : data_b->int32;
+		int va = attribute_as_int(type_a, &ea->data);
+		int vb = attribute_as_int(type_b, data_b);
 		int result;
 		switch (op_b) {
 			case AOP_ADD:
@@ -1106,8 +1180,8 @@ static int abuf_fold(
 			}
 		}
 	} else if (type_ab == STORAGE_FLOAT32) {
-		float va = ea->data.float32;
-		float vb = data_b->float32;
+		float va = attribute_as_float(type_a, &ea->data);
+		float vb = attribute_as_float(type_b, data_b);
 		float result;
 		switch (op_b) {
 			case AOP_ADD:
