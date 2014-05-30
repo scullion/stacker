@@ -1023,27 +1023,35 @@ Attribute *abuf_replace(AttributeBuffer *abuf, Attribute *a,
 void abuf_replace_range(AttributeBuffer *abuf, const Attribute *start, 
 	const Attribute *end, const AttributeBuffer *source)
 {
+	if (start == NULL)
+		start = (const Attribute *)abuf_first(abuf);
 	if (end == NULL)
 		end = (const Attribute *)abuf_end(abuf);
-	
-	unsigned old_start = (char *)start - abuf->buffer;
-	unsigned old_end = (char *)end - abuf->buffer;
-	unsigned old_range_size = old_end - old_start;
-	unsigned old_size = abuf->size;
-	
-	abuf->num_attributes -= count_attributes_between(
-		(const BufferEntry *)start, 
-		(const BufferEntry *)end);
+
+	unsigned old_start = 0;
 	unsigned new_range_size = 0;
 	if (source != NULL) {
 		new_range_size = source->size;
 		abuf->num_attributes += source->num_attributes;
 	}
-	unsigned new_end = old_start + new_range_size;
-	unsigned new_size = abuf->size + new_range_size - old_range_size;
 
-	abuf_reallocate(abuf, new_size);
-	memmove(abuf->buffer + new_end, abuf->buffer + old_end, old_size - old_end);
+	if (start != NULL && end != NULL) {
+		old_start = (char *)start - abuf->buffer;
+		unsigned old_end = (char *)end - abuf->buffer;
+		unsigned old_range_size = old_end - old_start;
+		unsigned old_size = abuf->size;
+		abuf->num_attributes -= count_attributes_between(
+			(const BufferEntry *)start, 
+			(const BufferEntry *)end);
+		unsigned new_end = old_start + new_range_size;
+		unsigned new_size = abuf->size + new_range_size - old_range_size;
+
+		abuf_reallocate(abuf, new_size);
+		memmove(abuf->buffer + new_end, abuf->buffer + old_end, 
+			old_size - old_end);
+	} else {
+		abuf_reallocate(abuf, new_range_size);
+	}
 	if (new_range_size != 0)
 		memcpy(abuf->buffer + old_start, source->buffer, new_range_size);
 	
