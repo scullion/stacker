@@ -455,10 +455,10 @@ unsigned make_node_rule_keys(const System *system, int node_token,
 	}
 
 	/* Append a pseudo-class based on the current interation state. */
-	if ((node_flags & NFLAG_INTERACTION_HIGHLIGHTED) != 0)
-		class_names[num_classes++] = system->rule_name_highlighted;
-	else if ((node_flags & NFLAG_INTERACTION_ACTIVE) != 0)
+	if ((node_flags & NFLAG_INTERACTION_ACTIVE) != 0)
 		class_names[num_classes++] = system->rule_name_active;
+	else if ((node_flags & NFLAG_INTERACTION_HIGHLIGHTED) != 0)
+		class_names[num_classes++] = system->rule_name_highlighted;
 
 	/* Order the classes and pseudo-classes by their hashed names. */
 	std::sort(class_names, class_names + num_classes);

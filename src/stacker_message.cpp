@@ -176,9 +176,13 @@ static bool handle_hyperlink_message(Document *document, Node *node,
 			highlight);
 		return true;
 	} else if (message->type == MSG_MOUSE_LEFT_DOWN) {
-		if (is_enabled(node))
+		if (is_enabled(node)) {
+			set_interaction_state(document, node, NFLAG_INTERACTION_ACTIVE, true);
 			notify_activated(document, node); 
+		}
 		return true;
+	} else if (message->type == MSG_MOUSE_LEFT_UP) {
+		set_interaction_state(document, node, NFLAG_INTERACTION_ACTIVE, false);
 	}
 	return false;
 }
