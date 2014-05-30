@@ -146,9 +146,9 @@ static bool local_fetch_callback(void *, const ParsedUrl *url,
 	/* Is this a local URL? */
 	bool is_local = false;
 	bool is_ide_url = false;
-	if (url->scheme == SCHEME_NONE || url->scheme == SCHEME_FILE) {
+	if (url->scheme_length == 0 || match_scheme(url, "file")) {
 		is_local = true;
-	} else if (url->scheme == SCHEME_STACKER) {
+	} else if (match_scheme(url, "stacker")) {
 		is_ide_url = url->host_length == strlen("ide") && 
 			!memcmp(url->url + url->host_start, "ide", url->host_length);
 		is_local = is_ide_url;
@@ -157,7 +157,8 @@ static bool local_fetch_callback(void *, const ParsedUrl *url,
 		return false;
 
 	/* A query only? */
-	*out_mime_type = (MimeType)url->mime_types[0];
+	*out_mime_type = guess_mime_type(url->url + url->extension_starts[0],
+		url->extension_lengths[0]);
 	if (out_data == NULL)
 		return true;
 
@@ -536,8 +537,8 @@ static bool gui_url_to_file_path(GuiState *state, const ParsedUrl *url,
 	char *buffer, unsigned buffer_size)
 {
 	state;
-	if (url == NULL || (url->scheme != SCHEME_FILE && 
-		url->scheme != SCHEME_NONE) || url->path_length <= 1 || 
+	if (url == NULL || (!match_scheme(url, "file") && 
+		url->scheme_length != 0) || url->path_length <= 1 || 
 		url->path_length + 1u > buffer_size)
 		return false;
 	const char *start = url->url + url->path_start;
@@ -1937,8 +1938,8 @@ int main(int argc, char *argv[])
 	argc; argv;
 	stkr::ide();
 
-	// urlcache::unit_test();
-	// getchar();
+	//urlcache::unit_test();
+	//getchar();
 
 	//sstl::unit_test();
 	//getchar();

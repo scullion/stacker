@@ -16,15 +16,6 @@ enum MimeType {
 	NUM_SUPPORTED_MIME_TYPES = MIMETYPE_NONE
 };
 
-enum UrlScheme {
-	SCHEME_HTTP,
-	SCHEME_HTTPS,
-	SCHEME_STACKER,
-	SCHEME_FILE,
-	SCHEME_NONE,
-	NUM_SUPPORTED_SCHEMES = SCHEME_NONE,
-};
-
 enum UrlFetchPriority {
 	URLP_UNSET = -1,
 	URLP_NO_FETCH,
@@ -66,16 +57,20 @@ enum UrlParseCode {
 	URLPARSE_INVALID_PORT
 };
 
+const unsigned PARSED_URL_MAX_EXTENSIONS = 4;
+
 struct ParsedUrl {
 	UrlParseCode code;
-	UrlScheme scheme;
-	char mime_types[4];
 	unsigned short length;
+	unsigned short scheme_length;
 	unsigned short host_start;
 	unsigned short host_length;
 	unsigned short port;
 	unsigned short path_start;
 	unsigned short path_length;
+	unsigned short extension_starts[PARSED_URL_MAX_EXTENSIONS];
+	unsigned short extension_lengths[PARSED_URL_MAX_EXTENSIONS];
+	unsigned short num_extensions;
 	unsigned short query_start;
 	unsigned short query_length;
 	char url[1];
@@ -200,9 +195,11 @@ enum UrlParseFlag {
 
 ParsedUrl *parse_url(const char *url, int length = -1, void *buffer = 0, 
 	unsigned buffer_size = 0, unsigned flags = URLPARSE_DECODE_PLUS_TO_SPACE, 
-	UrlScheme default_scheme = SCHEME_HTTP);
+	const char *default_scheme = "http");
 ParsedUrl *copy_parsed_url(const ParsedUrl *url, void *buffer = 0,
 	unsigned buffer_size = 0);
+int match_scheme(const ParsedUrl *url, const char *s, int slen = -1);
+int match_nth_extension(const ParsedUrl *url, unsigned n, const char *s, int slen = -1);
 unsigned url_decode(char *s, int length = -1, 
 	unsigned flags = URLPARSE_DECODE_PLUS_TO_SPACE);
 char *url_encode(const char *s, int length = -1, char *buffer = 0,
@@ -215,6 +212,8 @@ const char *path_file_name(const char *path);
 const char *path_extension(const char *path);
 const char *path_segment(unsigned n, const char *s, int slen = -1, 
 	int *out_length = 0, char *buffer = 0, unsigned buffer_size = 0);
+MimeType find_mime_type_by_name(const char *s, int length = -1);
+MimeType guess_mime_type(const char *s, int length = -1);
 
 /*
  * Tests

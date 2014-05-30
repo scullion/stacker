@@ -82,9 +82,6 @@ struct Cache {
 	unsigned num_notify_sinks;
 };
 
-const char * const SCHEME_STRINGS[NUM_SUPPORTED_SCHEMES + 1] = 
-	{ "http", "https", "stacker", "file", "none" };
-
 const char * const MIME_TYPE_STRINGS[NUM_SUPPORTED_MIME_TYPES + 1] = {
 	"application/octet-stream",
 	"application/json",
@@ -122,6 +119,8 @@ const char * const FETCH_STATE_STRINGS[NUM_FETCH_STATES] =
 const char * const PRIORITY_STRINGS[NUM_PRIORITY_LEVELS] =
 	{ "URLP_NO_FETCH", "URLP_NORMAL", "URLP_ELEVATED", "URLP_URGENT" };
 
+const char * const MATCH_DELIMITERS = " \t\r\n,";
+
 /*
  * Helpers
  */
@@ -145,19 +144,8 @@ const char *path_extension(const char *path)
 	return *p == '.' ? p + 1 : end;
 }
 
-static MimeType match_extension(const char *s, int length = -1)
-{
-	if (length < 0)
-		length = (int)strlen(s);
-	for (unsigned i = 0; i < NUM_MIME_TYPE_EXTENSIONS; ++i) {
-		if ((unsigned)length == strlen(MIME_TYPE_EXTENSIONS[i].extension) && 
-			0 == _memicmp(MIME_TYPE_EXTENSIONS[i].extension, s, length))
-			return MIME_TYPE_EXTENSIONS[i].mime_type;
-	}
-	return MIMETYPE_NONE;
-}
-
-static MimeType match_mime_type(const char *s, int length = -1)
+/* Converts a mime type string to a MimeType constant. */
+MimeType find_mime_type_by_name(const char *s, int length)
 {
 	if (length < 0)
 		length = (int)strlen(s);
@@ -169,16 +157,59 @@ static MimeType match_mime_type(const char *s, int length = -1)
 	return MIMETYPE_NONE;
 }
 
-static UrlScheme match_url_scheme(const char *s, int length = -1)
+/* Returns the mime type corresponding to a file extension. */
+MimeType guess_mime_type(const char *s, int length)
 {
 	if (length < 0)
 		length = (int)strlen(s);
-	for (unsigned i = 0; i < NUM_SUPPORTED_SCHEMES; ++i) {
-		if ((unsigned)length == strlen(SCHEME_STRINGS[i]) && 
-			0 == memcmp(SCHEME_STRINGS[i], s, length))
-			return (UrlScheme)i;
+	for (unsigned i = 0; i < NUM_MIME_TYPE_EXTENSIONS; ++i) {
+		if ((unsigned)length == strlen(MIME_TYPE_EXTENSIONS[i].extension) && 
+			0 == memcmp(MIME_TYPE_EXTENSIONS[i].extension, s, length))
+			return MIME_TYPE_EXTENSIONS[i].mime_type;
 	}
-	return SCHEME_NONE;
+	return MIMETYPE_NONE;
+}
+
+/* Given a comma- or space-delimited list of schemes, returns the 1-based
+ * index of the first scheme that matches that of "url", or zero if none
+ * match. */
+int match_scheme(const ParsedUrl *url, const char *s, int slen)
+{
+	unsigned toklen;
+	const char *end = s + ((slen < 0) ? strlen(s) : slen);
+	for (int index = 1; s != end; s += toklen, ++index) {
+		s += strspn(s, MATCH_DELIMITERS);
+		toklen = strcspn(s, MATCH_DELIMITERS);
+		if (toklen == url->scheme_length && 0 == memcmp(url->url, s, toklen))
+			return index;
+		if (toklen == 0)
+			break;
+	}
+	return 0;
+}
+
+/* Given a comma- or space-delimited list of path extensions, returns the 
+ * 1-based index of the extension that matches the n-th extension back in
+ * 'url', with zero denoting the last extension. Returns zero if none match. */
+int match_nth_extension(const ParsedUrl *url, unsigned n, const char *s, int slen)
+{
+	if (n >= PARSED_URL_MAX_EXTENSIONS)
+		return 0;
+	const char *end = s + ((slen < 0) ? strlen(s) : slen);
+	const char *ext = url->url + url->extension_starts[n];
+	unsigned extlen = url->extension_lengths[n];
+	if (extlen == 0)
+		return 0;
+	unsigned toklen;
+	for (int index = 1; s != end; s += toklen, ++index) {
+		s += strspn(s, MATCH_DELIMITERS);
+		toklen = strcspn(s, MATCH_DELIMITERS);
+		if (toklen == extlen && 0 == memcmp(s, ext, extlen))
+			return index;
+		if (toklen == 0)
+			break;
+	}
+	return 0;
 }
 
 /* Returns a pointer to a segment of a path based on the segment's 0-based 
@@ -309,7 +340,7 @@ char *url_encode(const char *s, int length, char *buffer, unsigned buffer_size,
 }
 
 ParsedUrl *parse_url(const char *url, int length, void *buffer, 
-	unsigned buffer_size, unsigned flags, UrlScheme default_scheme)
+	unsigned buffer_size, unsigned flags, const char *default_scheme)
 {
 	UrlParseCode code = URLPARSE_MALFORMED; // Assume the worst.
 
@@ -351,12 +382,14 @@ ParsedUrl *parse_url(const char *url, int length, void *buffer,
 		++p;
 	}
 
+	const char *scheme = NULL;
 	if (p + 3 <= end && *p == ':' && p[1] == '/' && p[2] == '/') {
 		/* There must be something both before and after "://" for the URL to 
 		 * make sense. */
 		if (p == url || p + 3 == end)
 			goto done; 
-		result->scheme = match_url_scheme(url, p - url);
+		scheme = url;
+		result->scheme_length = (unsigned short)(p - url);
 		p += 3;
 	} else {
 		/* What we've read so far isn't a scheme, so this is not a valid 
@@ -364,19 +397,20 @@ ParsedUrl *parse_url(const char *url, int length, void *buffer,
 		 * we treat this as an absolute URL with an omitted scheme, or something
 		 * else, in which case we treat it as a relative URL. */
 		if (treat_as_host_name) {
-			result->scheme = default_scheme;
+			scheme = default_scheme;
+			result->scheme_length = (unsigned short)strlen(default_scheme);
 		} else {
-			result->scheme = SCHEME_NONE;
+			scheme = NULL;
+			result->scheme_length = 0;
 		}
 		p = url; // Rewind to re-read what we've read so far as part of the
 		         // host or path.
 	}
 
 	/* If the URL is absolute, write out the canonical form of the scheme. */
-	if (result->scheme != SCHEME_NONE) {
-		const char *scheme_string = SCHEME_STRINGS[result->scheme];
-		while (*scheme_string != '\0')
-			*q++ = *scheme_string++;
+	if (scheme != NULL) {
+		for (unsigned i = 0; i < result->scheme_length; ++i)
+			*q++ = (char)tolower(scheme[i]);
 		if ((flags & URLPARSE_TERMINATE_PARTS) != 0) {
 			*q++ = '\0';
 		} else {
@@ -391,7 +425,7 @@ ParsedUrl *parse_url(const char *url, int length, void *buffer,
 	result->host_start = (unsigned short)(q - result->url);
 	result->host_length = 0;
 	result->port = 0;
-	if (result->scheme != SCHEME_NONE && p != end && isalnum(*p)) {
+	if (scheme != NULL && p != end && isalnum(*p)) {
 		do {
 			*q++ = (char)tolower(*p++);
 			result->host_length++;
@@ -431,11 +465,11 @@ ParsedUrl *parse_url(const char *url, int length, void *buffer,
 	/* The rest of the URL is the path, which we don't try to interpret,
 	 * perhaps followed by a query string. */
 	result->path_start = (unsigned short)(q - result->url);
-	memset(result->mime_types, MIMETYPE_NONE, sizeof(result->mime_types));
+	result->num_extensions = 0;
 	if (p != end) {
 		/* If the URL is absolute and it has a path, the path must start 
 		 * with '/'. */
-		if (result->scheme != SCHEME_NONE && *p != '/') {
+		if (scheme != NULL && *p != '/') {
 			code = URLPARSE_INVALID_HOST;
 			goto done;
 		}
@@ -447,21 +481,25 @@ ParsedUrl *parse_url(const char *url, int length, void *buffer,
 			result->path_length);
 		memcpy(q, p, result->path_length);
 
-		/* Read up to four extensions from the end of the path, attempting to
-		 * guess a mime type for each. */
+		/* Read up to four extensions from the end of the path. */
 		const char *dot = q + result->path_length;
-		for (unsigned ne = 0; ne < sizeof(result->mime_types); ++ne) {
+		unsigned i;
+		for (i = 0; i < PARSED_URL_MAX_EXTENSIONS; ) {
 			int el;
 			for (el = 0; dot - 1 - el >= q && !ispathsep(dot[-1 - el]); ++el) {
 				if (dot[-1 - el] == '.') {
-					result->mime_types[ne] = (char)match_extension(dot - el, el);
+					result->extension_starts[i] = (unsigned short)
+						(dot - el - result->url);
+					result->extension_lengths[i] = (unsigned short)el;
+					++i;
 					break;
 				}
 			}
 			dot -= el + 1;
-			if (dot - 1 <= q)
+			if (dot - 1 <= q || ispathsep(*dot))
 				break;
 		}
+		result->num_extensions = (unsigned short)i;
 		q += result->path_length;
 
 		/* Write out the query string. */
@@ -489,6 +527,12 @@ done:
 	} else {
 		result->length = (unsigned short)(q - result->url);
 		url_decode(result->url, result->length + 1, flags);
+		/* Set unused extension slots to an empty string. */
+		for (unsigned i = result->num_extensions; 
+			i != PARSED_URL_MAX_EXTENSIONS; ++i) {
+			result->extension_starts[i] = result->length;
+			result->extension_lengths[i] = 0;
+		}
 	}
 	result->code = code;
 	return result;
@@ -601,11 +645,12 @@ static bool default_local_fetch_callback(void *, const ParsedUrl *url,
 	void **out_data, unsigned *out_size, MimeType *out_mime_type)
 {
 	/* Is this a local URL? */
-	if (url->scheme != SCHEME_NONE && url->scheme != SCHEME_FILE)
+	if (url->scheme_length != 0 && !match_scheme(url, "file"))
 		return false;
 
 	/* A query only? */
-	*out_mime_type = (MimeType)url->mime_types[0];
+	*out_mime_type = guess_mime_type(url->url + url->extension_starts[0],
+		url->extension_lengths[0]);
 	if (out_data == NULL)
 		return true;
 
@@ -1310,7 +1355,7 @@ static void cache_handle_request_complete(Cache *cache, unsigned slot_number,
 	if (code == CURLE_OK) {
 		const char *content_type;
 		curl_easy_getinfo(slot->curl_handle, CURLINFO_CONTENT_TYPE, &content_type);
-		MimeType mime_type = match_mime_type(content_type);
+		MimeType mime_type = find_mime_type_by_name(content_type);
 		cache_set_entry_data(entry, slot->buffer, slot->data_size, mime_type, true);
 		entry->fetch_state = URL_FETCH_SUCCESSFUL;
 		entry->last_used = cache->clock;
@@ -1782,20 +1827,21 @@ static void unit_test_url_parser(FILE *os)
 	for (unsigned i = 0; i < NUM_TEST_URLS; ++i) {
 		const char *url = TEST_URLS[i];
 		ParsedUrl *parsed = parse_url(url, -1, buffer, sizeof(buffer), 
-			URLPARSE_DECODE_PLUS_TO_SPACE, SCHEME_HTTP);
+			URLPARSE_DECODE_PLUS_TO_SPACE, "http");
 		fprintf(os, 
 			"Url \"%s\" parsed with code %u:\n"
-			"\tscheme=%s\n"
+			"\tscheme=%.*s\n"
 			"\tcanonical=\"%.*s\"\n"
 			"\thost=\"%.*s\"\n"
 			"\tport=%d\n"
 			"\tpath=\"%.*s\"\n"
 			"\tquery=\"%.*s\"\n"
-			"\tfile_name=\"%s\"\n"
-			"\textension=\"%s\"\n"
-			"\tmime_types={%s, %s, %s, %s}\n", 
+			"\tpath_file_name()=\"%s\"\n"
+			"\tpath_extension()=\"%s\"\n"
+			"\turl_extensions={\"%.*s\", \"%.*s\", \"%.*s\", \"%.*s\"}\n"
+			"\tnum_extensions=%d\n", 
 			url, 
-			parsed->code, SCHEME_STRINGS[parsed->scheme],
+			parsed->code, parsed->scheme_length, parsed->url,
 			parsed->length, parsed->url,
 			parsed->host_length, parsed->url + parsed->host_start,
 			parsed->port,
@@ -1803,10 +1849,16 @@ static void unit_test_url_parser(FILE *os)
 			parsed->query_start, parsed->url + parsed->query_start,
 			path_file_name(parsed->url),
 			path_extension(parsed->url),
-			MIME_TYPE_STRINGS[parsed->mime_types[0]],
-			MIME_TYPE_STRINGS[parsed->mime_types[1]],
-			MIME_TYPE_STRINGS[parsed->mime_types[2]],
-			MIME_TYPE_STRINGS[parsed->mime_types[3]]);
+			parsed->extension_lengths[0], 
+			parsed->url + parsed->extension_starts[0],
+			parsed->extension_lengths[1], 
+			parsed->url + parsed->extension_starts[1],
+			parsed->extension_lengths[2], 
+			parsed->url + parsed->extension_starts[2],
+			parsed->extension_lengths[3], 
+			parsed->url + parsed->extension_starts[3],
+			parsed->num_extensions
+		);
 	}
 }
 
