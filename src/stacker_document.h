@@ -40,6 +40,7 @@ struct Document {
 	Node *hit_chain_tail;
 	unsigned hit_clock;
 	Node *hit_node;
+	Node *mouse_down_node;
 	CursorType cursor;
 
 	/* Mouse selection. */

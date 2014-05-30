@@ -389,6 +389,8 @@ static void hit_handle_node_destroy(Document *document, Node *node)
 			node, offsetof(Node, hit_prev));
 		if (node == document->hit_node)
 			document->hit_node = NULL;
+		if (node == document->mouse_down_node)
+			document->mouse_down_node = NULL;
 	}
 }
 
@@ -663,6 +665,7 @@ Document *create_document(System *system, unsigned flags)
 	document->root_dims[AXIS_H] = 0;
 	document->root_dims[AXIS_V] = 0;
 	document->hit_node = NULL;
+	document->mouse_down_node = NULL;
 	document->cursor = CT_DEFAULT;
 	document->navigation_state = DOCNAV_IDLE;
 	document->url_handle = urlcache::INVALID_URL_HANDLE;
@@ -767,6 +770,15 @@ void document_handle_mouse_event(Document *document, View *view,
 		prune_hit_chain(document);
 	}
 
+	/* Guarantee that button down/up messages are issued in pairs. */
+	Node *target = hit_node;
+	if (type == MSG_MOUSE_LEFT_DOWN || type == MSG_MOUSE_RIGHT_DOWN) {
+		document->mouse_down_node = hit_node;
+	} else if (type == MSG_MOUSE_LEFT_UP || type == MSG_MOUSE_RIGHT_UP) {
+		target = document->mouse_down_node;
+		document->mouse_down_node = NULL;
+	}
+
 	/* If a node was hit, send the raw mouse message to it. */
 	Message message;
 	message.type = type;
@@ -774,7 +786,7 @@ void document_handle_mouse_event(Document *document, View *view,
 	message.mouse.x = doc_x;
 	message.mouse.y = doc_y;
 	message.mouse.view = view;
-	send_message(document, hit_node, &message);
+	send_message(document, target, &message);
 }
 
 void document_handle_keyboard_event(Document *document, View *view, 
