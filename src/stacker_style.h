@@ -58,6 +58,9 @@ extern const unsigned DEBUG_LABEL_FONT_FLAGS;
 const uint32_t DEFAULT_TEXT_COLOR               = 0xFF000000;
 const uint32_t DEFAULT_SELECTED_TEXT_COLOR      = 0xFFFFFFFF;
 const uint32_t DEFAULT_SELECTED_TEXT_FILL_COLOR = 0xC0FF00EA;
+const uint32_t DEFAULT_LINK_COLOR               = 0xFFDE409C;
+const uint32_t DEFAULT_HIGHLIGHTED_LINK_COLOR   = 0xFFFCBBE1;
+const uint32_t DEFAULT_ACTIVE_LINK_COLOR        = 0xFF0FFABB;
 
 extern const NodeStyle DEFAULT_NODE_STYLE;
 
