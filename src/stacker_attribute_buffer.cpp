@@ -240,6 +240,42 @@ static unsigned supported_operators(AttributeSemantic semantic)
 	return AOP_BIT_ASSIGNMENT;
 }
 
+AttributeAssignment make_assignment(Token name, int value, 
+	ValueSemantic vs, AttributeOperator op)
+{
+	AttributeAssignment assignment;
+	assignment.name = name;
+	assignment.op = op;
+	variant_set_integer(&assignment.value, value, vs);
+	return assignment;
+}
+
+AttributeAssignment make_assignment(Token name, unsigned value, 
+	ValueSemantic vs, AttributeOperator op)
+{
+	return make_assignment(name, (int)value, vs, op);
+}
+
+AttributeAssignment make_assignment(Token name, float value, 
+	ValueSemantic vs, AttributeOperator op)
+{
+	AttributeAssignment assignment;
+	assignment.name = name;
+	assignment.op = op;
+	variant_set_float(&assignment.value, value, vs);
+	return assignment;
+}
+
+AttributeAssignment make_assignment(Token name, const char *value,
+	ValueSemantic vs, AttributeOperator op)
+{
+	AttributeAssignment assignment;
+	assignment.name = name;
+	assignment.op = op;
+	variant_set_string(&assignment.value, value, vs);
+	return assignment;
+}
+
 /* Parses a string of space- or comma-delimited tokens into the attribute
  * storage form for string sets: zero or more null-terminated strings 
  * concatenated end to end, terminated by an extra null at the end. Returns 

@@ -1146,12 +1146,9 @@ static void gui_update_structure_change_test(GuiState *state,
 			NFLAG_NOTIFY_EXPANSION, true);
 
 		AttributeAssignment rule_attributes[2];
-		rule_attributes[0].name = TOKEN_LAYOUT;
-		variant_set_integer(&rule_attributes[0].value, 
-			TOKEN_INLINE_CONTAINER, VSEM_TOKEN);
-		rule_attributes[1].name = TOKEN_COLOR;
+		rule_attributes[0] = make_assignment(TOKEN_LAYOUT, TOKEN_INLINE_CONTAINER, VSEM_TOKEN);
+		rule_attributes[1] = make_assignment(TOKEN_COLOR, 0xFFFF0000, VSEM_COLOR);
 
-		variant_set_integer(&rule_attributes[1].value, 0xFFFF0000, VSEM_COLOR);
 		add_rule(
 			&sts->rule_even, 
 			state->system, 
@@ -1180,7 +1177,7 @@ bool gui_structure_change_test_handle_message(GuiState *state,
 {
 	lp;
 
-	static const unsigned APPEND_COUNT = 50000;
+	static const unsigned APPEND_COUNT = 1;
 
 	Document *document = state->document;
 
@@ -1196,11 +1193,11 @@ bool gui_structure_change_test_handle_message(GuiState *state,
 			sprintf(text, "Message %u", sts->step);
 
 			AttributeAssignment attributes[2];
-			attributes[0].name = TOKEN_CLASS;
-			variant_set_string(&attributes[0].value, ((sts->step % 2) == 0) ? 
-				"even" : "odd");
-			attributes[1].name = TOKEN_LAYOUT;
-			variant_set_integer(&attributes[1].value, TOKEN_NONE, VSEM_TOKEN);
+			attributes[0] =  make_assignment(TOKEN_CLASS, 
+				((sts->step % 2) == 0) ? "even" : "odd",
+				VSEM_LIST);
+			attributes[1] = make_assignment(TOKEN_LAYOUT, TOKEN_NONE, 
+				VSEM_TOKEN);
 
 			Node *container = NULL;
 			int rc = create_node(

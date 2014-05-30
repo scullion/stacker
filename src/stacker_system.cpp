@@ -122,46 +122,6 @@ static void make_built_in_rule_names(System *system)
 	}
 }
 
-static AttributeAssignment make_assignment(Token name, int value, 
-	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET)
-{
-	AttributeAssignment assignment;
-	assignment.name = name;
-	assignment.op = op;
-	variant_set_integer(&assignment.value, value, vs);
-	return assignment;
-}
-
-static AttributeAssignment make_assignment(Token name, unsigned value, 
-	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET)
-{
-	AttributeAssignment assignment;
-	assignment.name = name;
-	assignment.op = op;
-	variant_set_integer(&assignment.value, value, vs);
-	return assignment;
-}
-
-static AttributeAssignment make_assignment(Token name, float value, 
-	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET)
-{
-	AttributeAssignment assignment;
-	assignment.name = name;
-	assignment.op = op;
-	variant_set_float(&assignment.value, value, vs);
-	return assignment;
-}
-
-static AttributeAssignment make_assignment(Token name, const char *value,
-	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET)
-{
-	AttributeAssignment assignment;
-	assignment.name = name;
-	assignment.op = op;
-	variant_set_string(&assignment.value, value, vs);
-	return assignment;
-}
-
 static void add_default_rules(System *system)
 {
 	static const unsigned MAX_ROOT_ATTRIBUTES = 32;

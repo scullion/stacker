@@ -275,4 +275,13 @@ inline void variant_set_string(Variant *v, const char *s,
 	variant_set_string(v, s, strlen(s), vs);
 }
 
+AttributeAssignment make_assignment(Token name, int value, 
+	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET);
+AttributeAssignment make_assignment(Token name, unsigned value, 
+	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET);
+AttributeAssignment make_assignment(Token name, float value,
+	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET);
+AttributeAssignment make_assignment(Token name, const char *value,
+	ValueSemantic vs = VSEM_NONE, AttributeOperator op = AOP_SET);
+
 } // namespace stkr

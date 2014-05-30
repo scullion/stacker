@@ -166,8 +166,7 @@ static void view_build_box_list(View *view)
 	unsigned j = 0;
 	for (unsigned i = 0; i < num_boxes; ++i) {
 		const Box *box = view->boxes[i];
-		if ((box->parent != NULL || box->owner == view->document->root) && 
-			(box->layers != NULL || (view->flags & VFLAG_DEBUG_MASK) != 0))
+		if (box->layers != NULL || (view->flags & VFLAG_DEBUG_MASK) != 0)
 			view->boxes[j++] = view->boxes[i];
 	}
 	view->boxes.resize(j);

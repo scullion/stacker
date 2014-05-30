@@ -299,7 +299,6 @@ static void box_notify_child_added_or_removed(Document *document,
  * changed. Does not change parent flags. */
 static void box_notify_new_parent(Document *document, Box *child, Box *parent)
 {
-	parent;
 	/* If the child's size is a function of its parent's, it will need to be
 	 * recalculated. */
 	unsigned clear_in_parents = 0;
@@ -311,6 +310,10 @@ static void box_notify_new_parent(Document *document, Box *child, Box *parent)
 	child->flags &= ~(BOXFLAG_CHILD_BOUNDS_VALID | BOXFLAG_TREE_BOUNDS_VALID);
 	clear_in_parents |= BOXFLAG_TREE_BOUNDS_VALID;
 	clear_flag_in_parents(document, child, clear_in_parents);
+	/* Boxes not in the tree should not be in the grid because we don't want
+	 * them to be found in queries for mouse selection and view visibility. */
+	if (parent == NULL && child->owner != document->root) 
+		grid_remove(document, child);
 }
 
 
@@ -553,7 +556,7 @@ void remove_all_children(Document *document, Box *parent)
 		child->parent = NULL;
 		child->prev_sibling = NULL;
 		child->next_sibling = NULL;
-		box_notify_new_parent(document, child, parent);
+		box_notify_new_parent(document, child, NULL);
 	}
 	parent->first_child = NULL;
 	parent->last_child = NULL;
@@ -638,8 +641,8 @@ void destroy_box(Document *document, Box *box, bool destroy_children)
 	document->system->total_boxes--;
 	document_notify_box_destroy(document, box);
 	release_layer_chain(document, VLCHAIN_BOX, box->layers);
-	grid_remove(document, box);
 	remove_from_parent(document, box);
+	grid_remove(document, box); 
 	if (destroy_children) {
 		destroy_sibling_chain(document, box->first_child, true);
 	} else {
@@ -761,10 +764,16 @@ inline bool set_box_position(Document *document, Box *box, float a, float b,
 		/* If this box is the primary box of its owning node, and it has moved, 
 		 * the node needs to rebuild visual layers that depend on the document 
 		 * position of its box. */
-		if (box->owner != NULL && box == get_box(box->owner))
+		if (box->owner != NULL && box == box->owner->box)
 			box->owner->flags |= NFLAG_UPDATE_TEXT_LAYERS | 
 				NFLAG_UPDATE_BOX_LAYERS;
+	} else if (box->cell == NULL) {
+		/* The box hasn't moved, but it isn't in the grid (boxes are removed
+		 * from the grid when they are hidden or changed parents). Now we know
+		 * the box's bounds, reinsert it into the grid. */
+		grid_insert(document, box);
 	}
+
 	return changed;
 }
 
