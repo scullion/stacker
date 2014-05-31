@@ -77,6 +77,9 @@ struct BackEndFont {
 extern const char * const DEFAULT_FONT_FACE        = "Segoe UI";
 extern const unsigned     DEFAULT_FONT_SIZE        = 16 * 96 / 72;
 extern const unsigned     DEFAULT_FONT_FLAGS       = 0;
+extern const char * const DEFAULT_FIXED_FONT_FACE  = "Consolas";
+extern const unsigned     DEFAULT_FIXED_FONT_SIZE  = 16 * 96 / 72;
+extern const unsigned     DEFAULT_FIXED_FONT_FLAGS = 0;
 extern const char * const DEBUG_LABEL_FONT_FACE    = "Consolas";
 extern const unsigned     DEBUG_LABEL_FONT_SIZE    = 10 * 96 / 72;
 extern const unsigned     DEBUG_LABEL_FONT_FLAGS   = 0;

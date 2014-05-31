@@ -51,6 +51,9 @@ enum StyleCompareFlag {
 extern const char * const DEFAULT_FONT_FACE;
 extern const unsigned DEFAULT_FONT_SIZE;
 extern const unsigned DEFAULT_FONT_FLAGS;
+extern const char * const DEFAULT_FIXED_FONT_FACE;
+extern const unsigned DEFAULT_FIXED_FONT_SIZE;
+extern const unsigned DEFAULT_FIXED_FONT_FLAGS;
 extern const char * const DEBUG_LABEL_FONT_FACE;
 extern const unsigned DEBUG_LABEL_FONT_SIZE;
 extern const unsigned DEBUG_LABEL_FONT_FLAGS;

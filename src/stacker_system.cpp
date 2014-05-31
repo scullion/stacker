@@ -122,6 +122,17 @@ static void make_built_in_rule_names(System *system)
 	}
 }
 
+static unsigned add_font_assignments(AttributeAssignment *attributes, 
+	unsigned count, const char *face, unsigned size, unsigned flags)
+{
+	attributes[count++] = make_assignment(TOKEN_FONT, face);
+	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, size);
+	attributes[count++] = make_assignment(TOKEN_BOLD, (flags & STYLE_BOLD) != 0, VSEM_BOOLEAN);
+	attributes[count++] = make_assignment(TOKEN_ITALIC, (flags & TOKEN_ITALIC) != 0, VSEM_BOOLEAN);
+	attributes[count++] = make_assignment(TOKEN_UNDERLINE, (flags & STYLE_UNDERLINE) != 0, VSEM_BOOLEAN);
+	return count;
+}
+
 static void add_default_rules(System *system)
 {
 	static const unsigned MAX_ROOT_ATTRIBUTES = 32;
@@ -130,60 +141,45 @@ static void add_default_rules(System *system)
 	unsigned count = 0;
 	
 	attributes[count++] = make_assignment(TOKEN_COLOR, DEFAULT_TEXT_COLOR, VSEM_COLOR);
-	attributes[count++] = make_assignment(TOKEN_FONT, DEFAULT_FONT_FACE);
-	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, DEFAULT_FONT_SIZE);
-	attributes[count++] = make_assignment(TOKEN_BOLD, 
-		(DEFAULT_FONT_FLAGS & STYLE_BOLD) != 0, VSEM_BOOLEAN);
-	attributes[count++] = make_assignment(TOKEN_ITALIC, 
-		(DEFAULT_FONT_FLAGS & TOKEN_ITALIC) != 0, VSEM_BOOLEAN);
-	attributes[count++] = make_assignment(TOKEN_UNDERLINE, 
-		(DEFAULT_FONT_FLAGS & STYLE_UNDERLINE) != 0, VSEM_BOOLEAN);
 	attributes[count++] = make_assignment(TOKEN_JUSTIFY, TOKEN_LEFT, VSEM_TOKEN);
 	attributes[count++] = make_assignment(TOKEN_WRAP, TOKEN_WORD_WRAP, VSEM_TOKEN);
 	attributes[count++] = make_assignment(TOKEN_WHITE_SPACE, TOKEN_NORMAL, VSEM_TOKEN);
-
-	add_rule(NULL, system, NULL, "document", -1, attributes, count, 
-		RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
+	count = add_font_assignments(attributes, count, DEFAULT_FONT_FACE, DEFAULT_FONT_SIZE, DEFAULT_FONT_FLAGS);
+	add_rule(NULL, system, NULL, "document", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
 	attributes[count++] = make_assignment(TOKEN_CURSOR, TOKEN_CURSOR_HAND, VSEM_TOKEN);
 	attributes[count++] = make_assignment(TOKEN_UNDERLINE, true, VSEM_BOOLEAN);
 	attributes[count++] = make_assignment(TOKEN_COLOR, DEFAULT_LINK_COLOR, VSEM_COLOR);
-	add_rule(NULL, system, NULL, "a", -1, attributes, count, 
-		RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
+	add_rule(NULL, system, NULL, "a", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
-	attributes[count++] = make_assignment(TOKEN_COLOR, 
-		DEFAULT_HIGHLIGHTED_LINK_COLOR, VSEM_COLOR);
-	add_rule(NULL, system, NULL, "a:highlighted", -1, attributes, count, 
-		RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
+	attributes[count++] = make_assignment(TOKEN_COLOR, DEFAULT_HIGHLIGHTED_LINK_COLOR, VSEM_COLOR);
+	add_rule(NULL, system, NULL, "a:highlighted", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
-	attributes[count++] = make_assignment(TOKEN_COLOR, 
-		DEFAULT_ACTIVE_LINK_COLOR, VSEM_COLOR);
-	add_rule(NULL, system, NULL, "a:active", -1, attributes, count, 
-		RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
+	attributes[count++] = make_assignment(TOKEN_COLOR, DEFAULT_ACTIVE_LINK_COLOR, VSEM_COLOR);
+	add_rule(NULL, system, NULL, "a:active", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
-	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, 2.5f, 
-		VSEM_NONE, AOP_MULTIPLY);
+	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, 2.5f, VSEM_NONE, AOP_MULTIPLY);
 	attributes[count++] = make_assignment(TOKEN_BOLD, true, VSEM_BOOLEAN);
-	add_rule(NULL, system, NULL, "h1", -1, attributes, count, 
-		RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
+	add_rule(NULL, system, NULL, "h1", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
-	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, 2.0f, 
-		VSEM_NONE, AOP_MULTIPLY);
+	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, 2.0f, VSEM_NONE, AOP_MULTIPLY);
 	attributes[count++] = make_assignment(TOKEN_BOLD, true, VSEM_BOOLEAN);
-	add_rule(NULL, system, NULL, "h2", -1, attributes, count, 
-		RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
+	add_rule(NULL, system, NULL, "h2", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
-	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, 1.5f, 
-		VSEM_NONE, AOP_MULTIPLY);
+	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, 1.5f, VSEM_NONE, AOP_MULTIPLY);
 	attributes[count++] = make_assignment(TOKEN_BOLD, true, VSEM_BOOLEAN);
-	add_rule(NULL, system, NULL, "h3", -1, attributes, count, 
-		RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
+	add_rule(NULL, system, NULL, "h3", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
+
+	count = 0;
+	attributes[count++] = make_assignment(TOKEN_WHITE_SPACE, TOKEN_PRESERVE, VSEM_TOKEN);
+	count = add_font_assignments(attributes, count, DEFAULT_FIXED_FONT_FACE, DEFAULT_FIXED_FONT_SIZE, DEFAULT_FIXED_FONT_FLAGS);
+	add_rule(NULL, system, NULL, "code", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 }
 
 static void initialize_url_notifications(System *system, UrlCache *url_cache)
