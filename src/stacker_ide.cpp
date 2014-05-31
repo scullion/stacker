@@ -1793,6 +1793,7 @@ static BOOL CALLBACK gui_dialog_proc(HWND hwnd, unsigned message, WPARAM wp, LPA
 	} else if (message == WM_SETCURSOR) {
 		POINT cursor_pos;
 		GetCursorPos(&cursor_pos);
+		ScreenToClient(state->dialog_window, &cursor_pos);
 		if (PtInRect(&state->doc_box, cursor_pos)) {
 			gui_update_cursor(state, get_cursor(state->document));
 			return TRUE;
