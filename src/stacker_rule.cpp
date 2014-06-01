@@ -580,7 +580,7 @@ unsigned match_rules(Document *document, Node *node,
 	const Rule **matched, unsigned max_rules,
 	const RuleTable *local_table, 
 	const RuleTable *global_table)
-{
+              {
 	static const unsigned MAX_MATCH_KEYS = 256;
 	static const unsigned LEVEL_MAX = 32;
 

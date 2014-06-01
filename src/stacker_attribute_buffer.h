@@ -1,6 +1,7 @@
 #pragma once
 
 #include "stacker_attribute.h"
+#include "stacker_util.h"
 
 namespace stkr {
 
@@ -14,8 +15,9 @@ struct Attribute {
 	uint8_t name;
 	uint8_t type : 3;
 	uint8_t mode : 5;
+	uint32_t folded: 1;
 	uint32_t op : 3;
-	uint32_t size : 29;
+	uint32_t size : 28;
 };
 
 #pragma pack(pop)
@@ -29,9 +31,10 @@ struct AttributeBuffer {
 
 extern const char * const STORAGE_STRINGS[NUM_ATTRIBUTE_TYPES];
 
-int token_to_attribute_operator(int token);
-AttributeSemantic attribute_semantic(int name_token);
-ValueSemantic value_semantic(int token);
+int token_to_attribute_operator(int name);
+AttributeSemantic attribute_semantic(int name);
+ValueSemantic value_semantic(int type_token);
+const Attribute *attribute_default_value(int name);
 
 int parse_string_list(const char *s, int length, char *buffer, 
 	unsigned buffer_size);
@@ -82,12 +85,14 @@ const unsigned ATTRIBUTE_MASK_WORDS = (NUM_ATTRIBUTE_TOKENS + 31) / 32;
 inline bool amask_test(const uint32_t *mask, int name)
 {
 	unsigned index = name - TOKEN_ATTRIBUTE_FIRST;
+	assertb(index < NUM_ATTRIBUTE_TOKENS);
 	return (mask[index / 32u] >> (index % 32u)) & 1;
 }
 
 inline void amask_or(uint32_t *mask, int name, bool value = true)
 {
 	unsigned index = name - TOKEN_ATTRIBUTE_FIRST;
+	assertb(index < NUM_ATTRIBUTE_TOKENS);
 	mask[index / 32u] |= (unsigned(value) << (index % 32u));
 }
 

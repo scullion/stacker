@@ -56,7 +56,6 @@ enum ValueSemantic {
 enum AttributeOperator {
 	AOP_SET,
 	AOP_OVERRIDE,
-	AOP_COMPUTED,
 	AOP_ADD,
 	AOP_SUBTRACT,
 	AOP_MULTIPLY,

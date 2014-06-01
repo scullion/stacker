@@ -51,7 +51,7 @@ enum NodeFlag {
 	NFLAG_UPDATE_BACKGROUND_LAYERS  = 1 << 1,  // The node's visual layer stack must be updated to reflect its current attributes.
 	NFLAG_UPDATE_TEXT_LAYERS        = 1 << 2,  // The node's text layer stack must be updated. This is done post-layout.
 	NFLAG_UPDATE_BOX_LAYERS         = 1 << 3,  // The box's layer stack must by synchronized with the node's.
-	NFLAG_COMPUTE_ATTRIBUTES        = 1 << 4,  // Final attribute values must be recalculated.
+	NFLAG_FOLD_ATTRIBUTES           = 1 << 4,  // Folded attribute values must be recalculated.
 	NFLAG_UPDATE_STYLE              = 1 << 5,  // Styles in this subtree should be recalculated. 
 	NFLAG_REBUILD_BOXES             = 1 << 6,  // This node's box must be recreated.
 	NFLAG_REBUILD_INLINE_CONTEXT    = 1 << 7,  // The node's inline context buffer must be rebuilt from its children.

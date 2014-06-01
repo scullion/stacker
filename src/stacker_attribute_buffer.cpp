@@ -49,9 +49,9 @@ extern const char * const STORAGE_STRINGS[NUM_ATTRIBUTE_TYPES] =
 
 /* Returns the attribute operator corresponding to a token, or -1 if the token
  * is not an operator token. */
-int token_to_attribute_operator(int token)
+int token_to_attribute_operator(int name)
 {
-	switch (token) {
+	switch (name) {
 		case TOKEN_EQUALS:
 			return AOP_SET;
 		case TOKEN_COLON_EQUALS:
@@ -69,9 +69,9 @@ int token_to_attribute_operator(int token)
 }
 
 /* Returns the storage type and mode set of an attribute given its name. */
-AttributeSemantic attribute_semantic(int name_token)
+AttributeSemantic attribute_semantic(int name)
 {
-	switch (name_token) {
+	switch (name) {
 		case TOKEN_WIDTH:
 		case TOKEN_HEIGHT:
 		case TOKEN_MIN_WIDTH:
@@ -194,9 +194,9 @@ static unsigned storage_mask(AttributeSemantic semantic, int mode)
  * interpretation that should be used during the value's validation and 
  * conversion. For example, a number might be a percentage, or a string might be 
  * a URL. */
-ValueSemantic value_semantic(int token)
+ValueSemantic value_semantic(int type_token)
 {
-	switch (token) {
+	switch (type_token) {
 		case TOKEN_INTEGER:
 		case TOKEN_STRING: 
 		case TOKEN_FLOAT:
@@ -210,7 +210,7 @@ ValueSemantic value_semantic(int token)
 		case TOKEN_URL_LITERAL:
 			return VSEM_URL;
 		default:
-			if (is_enum_token(token))
+			if (is_enum_token(type_token))
 				return VSEM_TOKEN;
 			break;
 	}
@@ -238,6 +238,44 @@ static unsigned supported_operators(AttributeSemantic semantic)
 			break;
 	}
 	return AOP_BIT_ASSIGNMENT;
+}
+
+const BufferEntry ATTR_ZERO             = { TOKEN_INVALID, STORAGE_INT32, ADEF_DEFINED, false, AOP_SET, 0 };
+const BufferEntry ATTR_EMPTY_STRING_SET = { TOKEN_INVALID, STORAGE_STRING, ADEF_DEFINED, false, AOP_SET, 1, '\0' };
+const BufferEntry ATTR_EMPTY_EDGE_SET   = { TOKEN_INVALID, STORAGE_NONE, EDGE_FLAG_NONE, false, AOP_SET, 0 };
+
+/* Returns a L.H.S. attribute to use when no SET is present in the expression
+ * for a particular attribute. This is defined for attributes with set semantics
+ * and numbers that have a natural zero value. For example, if the user puts
+ * 'class += "abc"' on a node but there are no other assignments to "class", 
+ * it's reasonable to compute the class as {"abc"} instead of considering its
+ * value to be undefined. */
+ const Attribute *attribute_default_value(int name)
+{
+	AttributeSemantic semantic = attribute_semantic(name);
+	switch (semantic) {
+		case ASEM_DIMENSON:
+		case ASEM_ABSOLUTE_DIMENSION:
+			switch (name) {
+				case TOKEN_PADDING:
+				case TOKEN_PADDING_LEFT:
+				case TOKEN_PADDING_RIGHT:
+				case TOKEN_PADDING_TOP:
+				case TOKEN_PADDING_BOTTOM:
+				case TOKEN_MARGIN:
+				case TOKEN_MARGIN_LEFT:
+				case TOKEN_MARGIN_RIGHT:
+				case TOKEN_MARGIN_TOP:
+				case TOKEN_MARGIN_BOTTOM:
+					return &ATTR_ZERO.header;
+			}
+			break;
+		case ASEM_EDGES:
+			return &ATTR_EMPTY_EDGE_SET.header;
+		case ASEM_STRING_SET:
+			return &ATTR_EMPTY_STRING_SET.header;
+	}
+	return NULL;
 }
 
 AttributeAssignment make_assignment(Token name, int value, 
@@ -906,6 +944,7 @@ static BufferEntry *abuf_create_attribute(AttributeBuffer *abuf, int name,
 	entry->header.name = (uint8_t)name;
 	entry->header.mode = mode;
 	entry->header.type = storage;
+	entry->header.folded = false;
 	entry->header.op = op;
 	entry->header.size = check16(data_size);
 	abuf->num_attributes++;
@@ -1139,11 +1178,12 @@ static int abuf_fold(
 {
 	/* Assignments just replace the existing attribute with a SET. */
 	AttributeOperator op_a = (AttributeOperator)ea->header.op;
-	if (op_b <= AOP_COMPUTED) {
+	if (op_b <= AOP_OVERRIDE) {
 		if (ea->header.size != size_b)
 			ea = abuf_resize_entry(abuf, ea, size_b);
 		ea->header.mode = mode_b;
-		ea->header.op = AOP_COMPUTED;
+		ea->header.folded = true;
+		ea->header.op = op_b;
 		ea->header.size = size_b;
 		ea->header.type = type_b;
 		memcpy(&ea->data, data_b, size_b);
@@ -1167,16 +1207,15 @@ static int abuf_fold(
 	/* Determine the operation to execute and the operation represented by the
 	 * result. */
 	AttributeOperator op = op_b, result_op = op_a;
-	if (op_a <= AOP_COMPUTED) {
-		/* A is a SET. The result is a COMPUTED.  */
-		result_op = AOP_COMPUTED;
+	if (op_a <= AOP_OVERRIDE) {
+		/* A is a set. The result is the same kind set. */
+		result_op = op_a;
 	} else {
-		/* Neither op is a SET. The result is a merged operator rather than
-		 * a computed value.*/
+		/* Neither op is a set. The result is a modifier. */
 		if (op_a == op_b) {
 			/* The operators are the same. We can always fold, but if the 
 			 * operator is non-associative, we have to invert it so that the
-			 * combined operation has the same effect as applying A followed
+			 * folded operation has the same effect as applying A followed
 			 * by B, e.g. -(a - b) => -(a + b) == - a - b. */
 			if (op == AOP_SUBTRACT || op == AOP_DIVIDE)
 				op = (AttributeOperator)(int(op) + 1);
@@ -1287,6 +1326,7 @@ static int abuf_fold(
 		if (type_a == STORAGE_NONE) {
 			ea = abuf_resize_entry(abuf, ea, size_b);
 			ea->header.mode = mode_b;
+			ea->header.folded = true;
 			ea->header.op = op_b;
 			ea->header.size = size_b;
 			ea->header.type = type_b;
@@ -1323,6 +1363,7 @@ static int abuf_fold(
 		} 
 	}
 
+	ea->header.folded = true;
 	ea->header.op = result_op;
 	if (out_folded != NULL)
 		*out_folded = ea;

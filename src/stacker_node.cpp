@@ -143,13 +143,12 @@ const Attribute *find_attribute(const Node *node, int name)
 	return attribute;
 }
 
-/* Searches for an attribute among a node's attribute buffer. The search does
- * not include attributes from matched rules. */
+/* Searches for an attribute in a node's private attribute buffer. */
 const Attribute *find_attribute_no_rules(const Node *node, int name)
 {
 	const Attribute *attribute = abuf_first(&node->attributes);
-	while (attribute != NULL && (attribute->op > AOP_COMPUTED || 
-		attribute->name != name))
+	while (attribute != NULL && (attribute->name != name || 
+		attribute->op > AOP_OVERRIDE))
 		attribute = abuf_next(&node->attributes, attribute);
 	return attribute;
 }
@@ -331,11 +330,11 @@ static unsigned sort_attribute_buffers(const Node *node,
 	return num_buffers;
 }
 
-static bool update_computed_attributes(Node *base);
+static bool refold_attributes(Node *base);
 
 const Attribute *node_first_attribute(const Node *node, AttributeIterator *ai)
 {
-	update_computed_attributes((Node *)node);
+	refold_attributes((Node *)node);
 	ai->node = node;
 	memset(ai->visited, 0, sizeof(ai->visited));
 	ai->num_buffers = (int)sort_attribute_buffers(node, ai->buffers);
@@ -359,7 +358,7 @@ const Attribute *node_next_attribute(AttributeIterator *ai)
 		if (amask_test(ai->visited, a->name))
 			continue;
 		amask_or(ai->visited, a->name);
-		if (a->mode != ADEF_UNDEFINED && a->op <= AOP_COMPUTED)
+		if (a->mode != ADEF_UNDEFINED && a->op <= AOP_OVERRIDE)
 			break;
 	}
 	ai->attribute = a;
@@ -379,7 +378,6 @@ struct AttributeFoldingState {
 	unsigned num_modifiers;
 	const Attribute *modifiers[MAX_MODIFIERS];
 	const Attribute *sorted_modifiers[MAX_MODIFIERS];
-
 	/* A set recording the attributes we have seen so far, their first SET (the
 	 * "left hand side" of the folding chain), and a modifier count. */
 	VisitedAttribute visited[NUM_ATTRIBUTE_TOKENS];
@@ -397,6 +395,7 @@ static VisitedAttribute *afs_add_visited(AttributeFoldingState *s, int name)
 {
 	VisitedAttribute *va;
 	unsigned index = name - TOKEN_ATTRIBUTE_FIRST;
+	assertb(index < NUM_ATTRIBUTE_TOKENS);
 	unsigned visited_index = s->visited_map[index];
 	if (visited_index >= s->num_visited || 
 		s->visited[visited_index].offset != index) {
@@ -433,7 +432,9 @@ static void afs_sort_modifiers(AttributeFoldingState *s)
 	}
 	for (unsigned i = 0; i < s->num_modifiers; ++i) {
 		const Attribute *a = s->modifiers[i];
-		unsigned j = s->visited_map[a->name - TOKEN_ATTRIBUTE_FIRST];
+		unsigned index = a->name - TOKEN_ATTRIBUTE_FIRST;
+		assertb(index < NUM_ATTRIBUTE_TOKENS);
+		unsigned j = s->visited_map[index];
 		s->sorted_modifiers[--s->visited[j].offset] = a;
 	}
 }
@@ -468,13 +469,13 @@ static void afs_add_modifiers(AttributeFoldingState *fs, Node *base)
 				 * completed on this level. We continue to add modifiers at
 				 * this level to implement the rule that SETs are reordered
 				 * past modifiers on the same level. */
-				if (b->op <= AOP_COMPUTED) {
-					/* Ignore stale COMPUTED results at the base level. */
-					if (b->op == AOP_COMPUTED && node == base)
+				if (b->op <= AOP_OVERRIDE) {
+					/* Ignore stale folded results at the base level. */
+					if (b->folded && node == base)
 						continue;
-					/* If this is the first SET/OVERRIDE/COMPUTED for this 
-					 * attribute, or it has higher priority than the existing
-					 * LHS, this attribute becomes the LHS. */
+					/* If this is the first entry eligible to be a LHS for this 
+					 * attribute, or it has higher priority than the existing 
+					 * LHS, this entry becomes the LHS. */
 					VisitedAttribute *va = afs_add_visited(fs, b->name);
 					if (va->lhs != NULL && b->op <= va->lhs->op)
 						continue;
@@ -496,28 +497,34 @@ static void afs_add_modifiers(AttributeFoldingState *fs, Node *base)
 }
 
 /* Computes the final value for each visited attribute, storing the results as
- * AOP_COMPUTED attributes at the start of 'dest'. */
+ * folded attributes at the start of 'dest'. */
 static void afs_reduce(AttributeFoldingState *fs, AttributeBuffer *dest)
 {
 	char work_buffer[256];
 	AttributeBuffer working;
 	abuf_init(&working, work_buffer, sizeof(work_buffer));
 	for (unsigned i = 0; i < fs->num_visited; ++i) {
-		const VisitedAttribute *va = fs->visited + i;
-		/* Modifiers with no SET do not define a value. */
-		if (va->lhs == NULL)
-			continue;
-		/* A SET with no modifiers need not be a computed attribute, because it
+		VisitedAttribute *va = fs->visited + i;
+		/* A set with no modifiers need not have a folded attribute because it
 		 * will be found by ordinary traversal. If the LHS is an override, we
-		 * make a computed attribute even if there are no modifiers because the
-		 * override must be found before any other SET. */
-		if (va->count == 0 && va->lhs->op != AOP_OVERRIDE)
+		 * make a folded attribute even if there are no modifiers because the
+		 * override must be found before any other set. */
+		if (va->count == 0 && (va->lhs == NULL || va->lhs->op != AOP_OVERRIDE))
 			continue; 
+		/* If the chain no explicit set, the value is undefined unless this
+		 * attribute has a static default LHS. */
+		const Attribute *rhs = fs->sorted_modifiers[va->offset];
+		if (va->lhs == NULL) {
+			va->lhs = attribute_default_value(rhs->name);
+			if (va->lhs == NULL)
+				continue;
+		}
 		/* Create a result attribute and fold in the modifiers. */
 		Attribute *lhs = abuf_append(&working, va->lhs);
-		lhs->op = AOP_COMPUTED;
+		lhs->name = rhs->name; /* Static defaults don't have a name. */
+		lhs->folded = true;
 		for (unsigned j = 0; j < va->count; ++j) {
-			const Attribute *rhs = fs->sorted_modifiers[va->offset + j];
+			rhs = fs->sorted_modifiers[va->offset + j];
 			abuf_fold(&working, lhs, rhs, &lhs);
 		}
 	}
@@ -526,32 +533,32 @@ static void afs_reduce(AttributeFoldingState *fs, AttributeBuffer *dest)
 	 * existing computed attributes at the start of the destination buffer
 	 * with the attributes in the working buffer. */
 	const Attribute *end = abuf_first(dest);
-	while (end != NULL && end->op == AOP_COMPUTED)
+	while (end != NULL && end->folded)
 		end = abuf_next(dest, end);
 	abuf_replace_range(dest, abuf_first(dest), end, &working);
 	abuf_clear(&working);
 }
 
 /* Recalculates the values of attributes defined by a node or its matched rules
- * that have one or more modifiers, storing the results as AOP_COMPUTED 
- * attributes at the start of the node's attribute buffer. */
-static bool update_computed_attributes(Node *base)
+ * that have one or more modifiers, storing the results as folded attributes at 
+ * the start of the node's attribute buffer. */
+static bool refold_attributes(Node *base)
 {
-	if ((base->flags & NFLAG_COMPUTE_ATTRIBUTES) == 0 && 
-		(base->parent == NULL || !update_computed_attributes(base->parent)))
+	if ((base->flags & NFLAG_FOLD_ATTRIBUTES) == 0 && 
+		(base->parent == NULL || !refold_attributes(base->parent)))
 		return false;
 	AttributeFoldingState fs;
 	afs_init(&fs);
 	afs_add_modifiers(&fs, base);
 	afs_sort_modifiers(&fs);
 	afs_reduce(&fs, &base->attributes);
-	base->flags &= ~NFLAG_COMPUTE_ATTRIBUTES;
+	base->flags &= ~NFLAG_FOLD_ATTRIBUTES;
 	return true;
 }
 
 void attribute_changed(Document *document, Node *node, int name)
 {
-	node->flags |= NFLAG_COMPUTE_ATTRIBUTES;
+	node->flags |= NFLAG_FOLD_ATTRIBUTES;
 	if (is_background_attribute(name))
 		set_node_flags(document, node, NFLAG_UPDATE_BACKGROUND_LAYERS, true);
 	if (is_cascaded_style_attribute(name))
@@ -698,7 +705,7 @@ void remove_from_parent(Document *document, Node *child)
 		document_notify_node_changed(document, parent);
 		child->parent = NULL;
 	}
-	child->flags |= NFLAG_PARENT_CHANGED | NFLAG_COMPUTE_ATTRIBUTES;
+	child->flags |= NFLAG_PARENT_CHANGED | NFLAG_FOLD_ATTRIBUTES;
 	document->change_clock++;
 	document_notify_node_changed(document, child);
 }
@@ -714,7 +721,7 @@ void insert_child_before(Document *document, Node *parent, Node *child,
 	child->parent = parent;
 	parent->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
 	propagate_expansion_flags(child, AXIS_BIT_H | AXIS_BIT_V);
-	child->flags |= NFLAG_PARENT_CHANGED | NFLAG_COMPUTE_ATTRIBUTES;
+	child->flags |= NFLAG_PARENT_CHANGED | NFLAG_FOLD_ATTRIBUTES;
 	document->change_clock++;
 	document_notify_node_changed(document, parent);
 }
@@ -953,7 +960,7 @@ int create_node(Node **result, Document *document, NodeType type, int tag_name,
 		NFLAG_PARENT_CHANGED | 
 		NFLAG_UPDATE_TEXT_LAYERS | 
 		NFLAG_UPDATE_BACKGROUND_LAYERS | 
-		NFLAG_COMPUTE_ATTRIBUTES |
+		NFLAG_FOLD_ATTRIBUTES |
 		NFLAG_UPDATE_STYLE | 
 		NFLAG_REBUILD_BOXES | 
 		NFLAG_UPDATE_MATCHED_RULES |
@@ -1138,7 +1145,7 @@ static bool update_rule_slots(Document *document, Node *node)
 	node->num_matched_rules = (uint8_t)num_matched;
 	node->flags &= ~NFLAG_UPDATE_MATCHED_RULES;
 	if (changed) 
-		node->flags |= NFLAG_COMPUTE_ATTRIBUTES | NFLAG_UPDATE_STYLE;
+		node->flags |= NFLAG_FOLD_ATTRIBUTES | NFLAG_UPDATE_STYLE;
 	return changed;
 }
 
@@ -1156,7 +1163,7 @@ static void check_rule_slots(Document *document, Node *node)
 		}
 	}
 	if (rules_changed)
-		node->flags |= NFLAG_COMPUTE_ATTRIBUTES | NFLAG_UPDATE_STYLE;
+		node->flags |= NFLAG_FOLD_ATTRIBUTES | NFLAG_UPDATE_STYLE;
 }
 
 /* If necessary, rebuilds a node's rule keys from its class attribute and 
