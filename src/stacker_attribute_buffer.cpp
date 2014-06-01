@@ -966,7 +966,7 @@ static BufferEntry *abuf_resize_entry(AttributeBuffer *abuf,
 	unsigned old_end_offset = start_offset + sizeof(Attribute) + entry->header.size;
 	unsigned new_end_offset = start_offset + sizeof(Attribute) + data_size;
 	char *old_end = abuf->buffer + old_end_offset;
-	if (int(new_size) > abuf->capacity) {
+	if (int(new_size) > abs(abuf->capacity)) {
 		char *new_buffer = new char[new_size];
 		char *new_end = new_buffer + new_end_offset;
 		unsigned copy_size = std::min(old_end_offset, new_end_offset);
