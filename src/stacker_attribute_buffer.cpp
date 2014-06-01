@@ -1482,12 +1482,12 @@ static int store_validated_attribute(AttributeBuffer *abuf, int name, int mode,
 	if (mode < 0)
 		return mode;
 
-	/* A size query? */
-	if (abuf == NULL)
-		return sizeof(Attribute) + vr->size;
-
 	/* Validated strings are not necessarily null terminated. */
 	unsigned stored_size = vr->size + vr->terminators;
+
+	/* A size query? */
+	if (abuf == NULL)
+		return sizeof(Attribute) + stored_size;
 
 	BufferEntry *entry;
 	if (fold) {
