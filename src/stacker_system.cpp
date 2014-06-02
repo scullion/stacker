@@ -143,9 +143,15 @@ static void add_default_rules(System *system)
 	attributes[count++] = make_assignment(TOKEN_COLOR, DEFAULT_TEXT_COLOR, VSEM_COLOR);
 	attributes[count++] = make_assignment(TOKEN_JUSTIFY, TOKEN_LEFT, VSEM_TOKEN);
 	attributes[count++] = make_assignment(TOKEN_WRAP, TOKEN_WORD_WRAP, VSEM_TOKEN);
+	attributes[count++] = make_assignment(TOKEN_LEADING, TOKEN_AUTO, VSEM_TOKEN);
 	attributes[count++] = make_assignment(TOKEN_WHITE_SPACE, TOKEN_NORMAL, VSEM_TOKEN);
 	count = add_font_assignments(attributes, count, DEFAULT_FONT_FACE, DEFAULT_FONT_SIZE, DEFAULT_FONT_FLAGS);
 	add_rule(NULL, system, NULL, "document", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
+
+	count = 0;
+	attributes[count++] = make_assignment(TOKEN_JUSTIFY, TOKEN_FLUSH, VSEM_TOKEN);
+	attributes[count++] = make_assignment(TOKEN_INDENT, TOKEN_AUTO, VSEM_TOKEN);
+	add_rule(NULL, system, NULL, "p", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
 	attributes[count++] = make_assignment(TOKEN_CURSOR, TOKEN_CURSOR_HAND, VSEM_TOKEN);
