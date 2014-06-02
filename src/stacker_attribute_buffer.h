@@ -34,7 +34,7 @@ extern const char * const STORAGE_STRINGS[NUM_ATTRIBUTE_TYPES];
 int token_to_attribute_operator(int name);
 AttributeSemantic attribute_semantic(int name);
 ValueSemantic value_semantic(int type_token);
-const Attribute *attribute_default_value(int name);
+bool is_auto_mode(int name, int mode);
 
 int parse_string_list(const char *s, int length, char *buffer, 
 	unsigned buffer_size);
@@ -49,6 +49,13 @@ const Attribute *abuf_next(const AttributeBuffer *abuf,
 	const Attribute *attribute);
 Attribute *abuf_append(AttributeBuffer *abuf, const Attribute *attribute);
 Attribute *abuf_prepend(AttributeBuffer *abuf, const Attribute *attribute);
+Attribute *abuf_append_integer(AttributeBuffer *abuf, int name, 
+	ValueSemantic vs, int value, AttributeOperator op = AOP_SET);
+Attribute *abuf_append_float(AttributeBuffer *abuf, int name, 
+	ValueSemantic vs, float value, AttributeOperator op = AOP_SET);
+Attribute *abuf_append_string(AttributeBuffer *abuf, int name, 
+	ValueSemantic vs, const char *value, int length, 
+	AttributeOperator op = AOP_SET);
 Attribute *abuf_replace(AttributeBuffer *abuf, Attribute *a, const Attribute *b);
 void abuf_replace_range(AttributeBuffer *abuf, const Attribute *start, 
 	const Attribute *end, const AttributeBuffer *source = 0);
@@ -66,8 +73,12 @@ int abuf_set(AttributeBuffer *abuf, Token name, const Variant *value,
 int abuf_read_mode(const Attribute *attribute, int defmode = ADEF_UNDEFINED);
 int abuf_read_integer(const Attribute *attribute, int32_t *result, 
 	int32_t defval = 0);
+int abuf_evaluate_integer(const Attribute *attribute, int32_t *result, 
+	int32_t lhs, int32_t defval = 0);
 int abuf_read_float(const Attribute *attribute, float *result, 
 	float defval = 0.0f);
+int abuf_evaluate_float(const Attribute *attribute, float *result, 
+	float lhs, float defval = 0.0f);
 int abuf_read_string(const Attribute *attribute, const char **result, 
 	uint32_t *length = 0, const char *defval = 0);
 int abuf_read_string(const Attribute *attribute, char *buffer, 

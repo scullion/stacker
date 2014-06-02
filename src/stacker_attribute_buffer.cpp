@@ -240,42 +240,16 @@ static unsigned supported_operators(AttributeSemantic semantic)
 	return AOP_BIT_ASSIGNMENT;
 }
 
-const BufferEntry ATTR_ZERO             = { TOKEN_INVALID, STORAGE_INT32, ADEF_DEFINED, false, AOP_SET, 0 };
-const BufferEntry ATTR_EMPTY_STRING_SET = { TOKEN_INVALID, STORAGE_STRING, ADEF_DEFINED, false, AOP_SET, 1, '\0' };
-const BufferEntry ATTR_EMPTY_EDGE_SET   = { TOKEN_INVALID, STORAGE_NONE, EDGE_FLAG_NONE, false, AOP_SET, 0 };
-
-/* Returns a L.H.S. attribute to use when no SET is present in the expression
- * for a particular attribute. This is defined for attributes with set semantics
- * and numbers that have a natural zero value. For example, if the user puts
- * 'class += "abc"' on a node but there are no other assignments to "class", 
- * it's reasonable to compute the class as {"abc"} instead of considering its
- * value to be undefined. */
- const Attribute *attribute_default_value(int name)
+/* True if 'mode' means "auto" for a particular attribute. */
+bool is_auto_mode(int name, int mode)
 {
 	AttributeSemantic semantic = attribute_semantic(name);
 	switch (semantic) {
 		case ASEM_DIMENSON:
 		case ASEM_ABSOLUTE_DIMENSION:
-			switch (name) {
-				case TOKEN_PADDING:
-				case TOKEN_PADDING_LEFT:
-				case TOKEN_PADDING_RIGHT:
-				case TOKEN_PADDING_TOP:
-				case TOKEN_PADDING_BOTTOM:
-				case TOKEN_MARGIN:
-				case TOKEN_MARGIN_LEFT:
-				case TOKEN_MARGIN_RIGHT:
-				case TOKEN_MARGIN_TOP:
-				case TOKEN_MARGIN_BOTTOM:
-					return &ATTR_ZERO.header;
-			}
-			break;
-		case ASEM_EDGES:
-			return &ATTR_EMPTY_EDGE_SET.header;
-		case ASEM_STRING_SET:
-			return &ATTR_EMPTY_STRING_SET.header;
+			return (mode == DMODE_AUTO);
 	}
-	return NULL;
+	return false;
 }
 
 AttributeAssignment make_assignment(Token name, int value, 
@@ -1132,9 +1106,11 @@ void abuf_replace_range(AttributeBuffer *abuf, const Attribute *start,
 	
 }
 
-/* Casts a numeric attribute to an integer. */
-static int attribute_as_int(AttributeStorage storage, const AttributeData *data)
+/* Returns the value of a numerical attribute as an integer. */
+static int unpack_integer(AttributeSemantic semantic, int mode, 
+	AttributeStorage storage, const AttributeData *data)
 {
+	semantic; mode; 
 	switch (storage) {
 		case STORAGE_INT16:
 			return (int)data->int16;
@@ -1147,17 +1123,66 @@ static int attribute_as_int(AttributeStorage storage, const AttributeData *data)
 	return 0;
 }
 
-/* Casts a numeric attribute to a float. */
-static float attribute_as_float(AttributeStorage storage, 
-	const AttributeData *data)
+/* Returns the value of numerical attribute as a float. */
+static float unpack_float(AttributeSemantic semantic, int mode, 
+	AttributeStorage storage, const AttributeData *data)
 {
+	float result;
 	switch (storage) {
 		case STORAGE_INT16:
-			return (float)data->int16;
+			result = float(data->int16);
+			if (semantic == ASEM_DIMENSON && mode == DMODE_FRACTIONAL)
+				result *= 1.0f / float(INT16_MAX);
+			break;
 		case STORAGE_INT32:
-			return (float)data->int32;
+			result = float(data->int32);
+			if (semantic == ASEM_DIMENSON && mode == DMODE_FRACTIONAL)
+				result *= 1.0f / float(INT32_MAX);
+			break;
 		case STORAGE_FLOAT32:
-			return (float)data->float32;
+			result = data->float32;
+			break;
+		default:
+			assertb(false);
+			result = 0.0f;
+			break;
+	}
+	return result;
+}
+
+static int do_integer_op(AttributeOperator op, int va, int vb)
+{
+	switch (op) {
+		case AOP_ADD: 
+			return va + vb;
+		case AOP_SUBTRACT: 
+			return va - vb;
+		case AOP_MULTIPLY: 
+			return va * vb;
+		case AOP_DIVIDE: 
+			return vb != 0 ? va / vb : 0;
+		case AOP_SET:
+		case AOP_OVERRIDE:
+			return vb;
+	}
+	assertb(false);
+	return 0;
+}
+
+static float do_float_op(AttributeOperator op, float va, float vb)
+{
+	switch (op) {
+		case AOP_ADD:
+			return va + vb;
+		case AOP_SUBTRACT:
+			return va - vb;
+		case AOP_MULTIPLY:
+			return va * vb;
+		case AOP_DIVIDE:
+			return vb != 0.0f ? va / vb : 0.0f;
+		case AOP_SET:
+		case AOP_OVERRIDE:
+			return vb;
 	}
 	assertb(false);
 	return 0.0f;
@@ -1250,26 +1275,9 @@ static int abuf_fold(
 			changed = true;
 		}
 	} else if (type_ab == STORAGE_INT16 || type_ab == STORAGE_INT32) {
-		int va = attribute_as_int(type_a, &ea->data);
-		int vb = attribute_as_int(type_b, data_b);
-		int result;
-		switch (op_b) {
-			case AOP_ADD:
-				result = va + vb;
-				break;
-			case AOP_SUBTRACT:
-				result = va - vb;
-				break;
-			case AOP_MULTIPLY:
-				result = va * vb;
-				break;
-			case AOP_DIVIDE:
-				result = vb != 0 ? va / vb : 0;
-				break;
-			default:
-				assertb(false);
-				return NULL;
-		}
+		int va = unpack_integer(as, ea->header.mode, type_a, &ea->data);
+		int vb = unpack_integer(as, mode_b, type_b, data_b);
+		int result = do_integer_op(op, va, vb);
 		if (type_a != type_ab) {
 			unsigned data_size = (type_ab == STORAGE_INT16) ? 
 				sizeof(int16_t) : sizeof(int32_t);
@@ -1293,26 +1301,9 @@ static int abuf_fold(
 			}
 		}
 	} else if (type_ab == STORAGE_FLOAT32) {
-		float va = attribute_as_float(type_a, &ea->data);
-		float vb = attribute_as_float(type_b, data_b);
-		float result;
-		switch (op_b) {
-			case AOP_ADD:
-				result = va + vb;
-				break;
-			case AOP_SUBTRACT:
-				result = va - vb;
-				break;
-			case AOP_MULTIPLY:
-				result = va * vb;
-				break;
-			case AOP_DIVIDE:
-				result = vb != 0.0f ? va / vb : 0.0f;
-				break;
-			default:
-				assertb(false);
-				return NULL;
-		}
+		float va = unpack_float(as, ea->header.mode, type_a, &ea->data);
+		float vb = unpack_float(as, mode_b, type_b, data_b);
+		float result = do_float_op(op, va, vb);
 		if (type_a != STORAGE_FLOAT32) {
 			ea = abuf_resize_entry(abuf, ea, sizeof(float));
 			ea->header.type = STORAGE_FLOAT32;
@@ -1400,25 +1391,22 @@ int abuf_read_integer(const Attribute *attribute, int32_t *result,
 		*result = defval;
 		return ADEF_UNDEFINED;
 	}
+	AttributeSemantic as = attribute_semantic(attribute->name);
 	const BufferEntry *entry = (const BufferEntry *)attribute;
-	switch (attribute->type) {
-		case STORAGE_NONE:
-			*result = defval;
-			break;
-		case STORAGE_INT16:
-			*result = entry->data.int16;
-			break;
-		case STORAGE_INT32:
-			*result = entry->data.int32;
-			break;
-		case STORAGE_FLOAT32:
-			*result = round_signed(entry->data.float32);
-			break;
-		default:
-			assertb(false);
-			return ADEF_UNDEFINED;
-	}
+	*result = unpack_integer(as, entry->header.mode, 
+		(AttributeStorage)entry->header.type, &entry->data);
 	return attribute->mode;
+}
+
+/* Reads an attribute as an integer. If the attribute represent a partially 
+ * evaluated expression, it is evaluated with the supplied LHS.*/
+int abuf_evaluate_integer(const Attribute *attribute, int32_t *result, 
+	int32_t lhs, int32_t defval)
+{
+	int mode = abuf_read_integer(attribute, result, defval);
+	if (mode != ADEF_UNDEFINED)
+		*result = do_integer_op((AttributeOperator)attribute->op, lhs, *result);
+	return mode;
 }
 
 /* Reads an attribute as a float. */
@@ -1430,28 +1418,20 @@ int abuf_read_float(const Attribute *attribute, float *result, float defval)
 	}
 	AttributeSemantic as = attribute_semantic(attribute->name);
 	const BufferEntry *entry = (const BufferEntry *)attribute;
-	switch (attribute->type) {
-		case STORAGE_NONE:
-			*result = defval;
-			break;
-		case STORAGE_INT16:
-			*result = float(entry->data.int16);
-			if (as == ASEM_DIMENSON && attribute->mode == DMODE_FRACTIONAL)
-				*result *= 1.0f / float(INT16_MAX);
-			break;
-		case STORAGE_INT32:
-			*result = float(entry->data.int32);
-			if (as == ASEM_DIMENSON && attribute->mode == DMODE_FRACTIONAL)
-				*result *= 1.0f / float(INT32_MAX);
-			break;
-		case STORAGE_FLOAT32:
-			*result = entry->data.float32;
-			break;
-		default:
-			assertb(false);
-			return ADEF_UNDEFINED;
-	}
+	*result = unpack_float(as, entry->header.mode, 
+		(AttributeStorage)entry->header.type, &entry->data);
 	return attribute->mode;
+}
+
+/* Reads an attribute as a float. If the attribute represent a partially 
+ * evaluated expression, it is evaluated with the supplied LHS. */
+int abuf_evaluate_float(const Attribute *attribute, float *result, 
+	float lhs, float defval)
+{
+	int mode = abuf_read_float(attribute, result, defval);
+	if (mode != ADEF_UNDEFINED)
+		*result = do_float_op((AttributeOperator)attribute->op, lhs, *result);
+	return mode;
 }
 
 /* Reads an attribute value as a string, returning a pointer to the data inside
@@ -1512,6 +1492,20 @@ int abuf_read_string(const Attribute *attribute, char *buffer,
 	if (out_length != NULL)
 		*out_length = length;
 	return mode;
+}
+
+/* Creates a new attribute at the end of the buffer and stores the supplied
+ * value in it. Does not check for existing values. */
+static Attribute *append_validated_attribute(AttributeBuffer *abuf, int name, 
+	int mode, AttributeOperator op, const ValidationResult *vr)
+{
+	if (mode < 0)
+		return NULL;
+	BufferEntry *entry = abuf_create_attribute(abuf, name, mode, vr->storage, 
+		op, vr->size + vr->terminators);
+	memcpy(&entry->data, vr->data, vr->size);
+	memset(&entry->data.string[vr->size], 0, vr->terminators);
+	return &entry->header;
 }
 
 /* Copies the result of attribute validation into an attribute buffer entry,
@@ -1644,6 +1638,39 @@ int abuf_set(AttributeBuffer *abuf, Token name, const Variant *value,
 	}
 	assertb(false);
 	return -1;
+}
+
+/* Convenience function to add a new integer attribute without checking for
+ * existing values. */
+Attribute *abuf_append_integer(AttributeBuffer *abuf, int name, 
+	ValueSemantic vs, int value, AttributeOperator op)
+{
+	ValidationResult vr;
+	vresult_init(&vr);
+	int mode = validate_integer(name, vs, value, op, &vr);
+	return append_validated_attribute(abuf, name, mode, op, &vr);
+}
+
+/* Convenience function to add a new float attribute without checking for
+ * existing values. */
+Attribute *abuf_append_float(AttributeBuffer *abuf, int name, 
+	ValueSemantic vs, float value, AttributeOperator op)
+{
+	ValidationResult vr;
+	vresult_init(&vr);
+	int mode = validate_float(name, vs, value, op, &vr);
+	return append_validated_attribute(abuf, name, mode, op, &vr);
+}
+
+/* Convenience function to add a new string attribute without checking for
+ * existing values. */
+Attribute *abuf_append_string(AttributeBuffer *abuf, int name, 
+	ValueSemantic vs, const char *value, int length, AttributeOperator op)
+{
+	ValidationResult vr;
+	vresult_init(&vr);
+	int mode = validate_string(name, vs, value, length, op, &vr);
+	return append_validated_attribute(abuf, name, mode, op, &vr);
 }
 
 /* Handles the storage of shorthand attributes like 'pad', which set other

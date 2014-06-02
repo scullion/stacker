@@ -595,7 +595,7 @@ void update_document(Document *document)
 
 	lmsg("Begin layout, new clock is %u.\n", document->layout_clock);
 	bool rule_tables_changed = check_rule_tables(document);
-	update_nodes_pre_layout(document, root, 0, NULL, rule_tables_changed);
+	update_nodes_pre_layout(document, root, 0, rule_tables_changed);
 
 	lmsg("\nBegin first box pass.\n");
 	if ((document->flags & DOCFLAG_DEBUG_FULL_LAYOUT) != 0)

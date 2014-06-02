@@ -113,8 +113,7 @@ const Node *lowest_common_ancestor(const Node *a, const Node *b,
 bool node_before(const Node *a, const Node *b);
 
 unsigned update_nodes_pre_layout(Document *document, Node *node, 
-	unsigned propagate_down = 0, const struct NodeStyle *inherited = 0,
-	bool rule_tables_changed = false);
+	unsigned propagate_down = 0, bool rule_tables_changed = false);
 unsigned update_nodes_post_layout(Document *document, Node *node, 
 	unsigned propagate_down = 0);
 void do_text_layout(Document *document, Node *node);

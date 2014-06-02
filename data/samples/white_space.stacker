@@ -42,5 +42,5 @@ static unsigned determine_breakpoints(const Paragraph *p, ParagraphLine *lines)
         num_breakpoints = 1;
 }
 </code>
-<rule match="code" white-space=preserve font="Consolas" font-size=12 color=rgb(0, 255, 0) />
-<rule match="document" background=rgb(0,0,0)/>
+<rule match="code" color=rgb(0, 255, 0) />
+<rule match="document" background=rgb(0,0,0) selection-fill-color=rgb(255, 0, 0) />

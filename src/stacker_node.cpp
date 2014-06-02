@@ -330,11 +330,11 @@ static unsigned sort_attribute_buffers(const Node *node,
 	return num_buffers;
 }
 
-static bool refold_attributes(Node *base);
+static bool refold_attributes(Document *document, Node *base);
 
 const Attribute *node_first_attribute(const Node *node, AttributeIterator *ai)
 {
-	refold_attributes((Node *)node);
+	refold_attributes((Document *)node->document, (Node *)node);
 	ai->node = node;
 	memset(ai->visited, 0, sizeof(ai->visited));
 	ai->num_buffers = (int)sort_attribute_buffers(node, ai->buffers);
@@ -368,28 +368,37 @@ const Attribute *node_next_attribute(AttributeIterator *ai)
 static const unsigned MAX_MODIFIERS = 2048;
 
 struct VisitedAttribute { 
+	short name;
+	bool must_fold;
 	const Attribute *lhs;
 	unsigned offset;
 	unsigned count;
 };
 
 struct AttributeFoldingState {
+	Node *base;
+
 	/* A list of non-SET attributes to be applied in reverse order. */
 	unsigned num_modifiers;
 	const Attribute *modifiers[MAX_MODIFIERS];
 	const Attribute *sorted_modifiers[MAX_MODIFIERS];
+	uint32_t required[ATTRIBUTE_MASK_WORDS];
+
 	/* A set recording the attributes we have seen so far, their first SET (the
 	 * "left hand side" of the folding chain), and a modifier count. */
 	VisitedAttribute visited[NUM_ATTRIBUTE_TOKENS];
 	unsigned num_visited;
 	unsigned visited_map[NUM_ATTRIBUTE_TOKENS];
-};
 
-static void afs_init(AttributeFoldingState *s)
-{
-	s->num_modifiers = 0;
-	s->num_visited = 0;
-}
+	/* Working state used to build the style. */
+	NodeStyle style;
+	const NodeStyle *inherited;
+	LogicalFont descriptor;
+	bool have_font_face;
+	bool have_font_size;
+	bool must_update_font_id;
+	bool text_style_changed;
+};
 
 static VisitedAttribute *afs_add_visited(AttributeFoldingState *s, int name)
 {
@@ -401,6 +410,8 @@ static VisitedAttribute *afs_add_visited(AttributeFoldingState *s, int name)
 		s->visited[visited_index].offset != index) {
 		s->visited_map[index] = s->num_visited;
 		va = &s->visited[s->num_visited++];
+		va->name = (short)name;
+		va->must_fold = false;
 		va->offset = index;
 		va->count = 0;
 		va->lhs = NULL;
@@ -441,12 +452,11 @@ static void afs_sort_modifiers(AttributeFoldingState *s)
 
 /* Builds a set of attributes that must be computed for 'base' and a list of
  * the modifiers needed to compute them. */
-static void afs_add_modifiers(AttributeFoldingState *fs, Node *base)
+static void afs_add_modifiers(AttributeFoldingState *fs)
 {
-	uint32_t required[ATTRIBUTE_MASK_WORDS] = { 0 };
 	uint32_t have_lhs[ATTRIBUTE_MASK_WORDS] = { 0 };
 
-	for (const Node *node = base; node != NULL; node = node->parent) {
+	for (const Node *node = fs->base; node != NULL; node = node->parent) {
 		/* Get the attribute buffers of this node and its matched rules. */
 		const AttributeBuffer *buffers[1 + NUM_RULE_SLOTS];
 		unsigned num_buffers = sort_attribute_buffers(node, buffers);
@@ -457,8 +467,8 @@ static void afs_add_modifiers(AttributeFoldingState *fs, Node *base)
 				b = abuf_next(buffers[i], b)) {
 				/* Ignore this attribute if it's not in the set of attributes
 				 * we're looking for. */
-				amask_or(required, b->name, node == base);
-				if (!amask_test(required, b->name))
+				amask_or(fs->required, b->name, node == fs->base);
+				if (!amask_test(fs->required, b->name))
 					continue;
 
 				/* Ignore the attribute if it was completed in a child node. */
@@ -471,7 +481,7 @@ static void afs_add_modifiers(AttributeFoldingState *fs, Node *base)
 				 * past modifiers on the same level. */
 				if (b->op <= AOP_OVERRIDE) {
 					/* Ignore stale folded results at the base level. */
-					if (b->folded && node == base)
+					if (b->folded && node == fs->base)
 						continue;
 					/* If this is the first entry eligible to be a LHS for this 
 					 * attribute, or it has higher priority than the existing 
@@ -479,6 +489,18 @@ static void afs_add_modifiers(AttributeFoldingState *fs, Node *base)
 					VisitedAttribute *va = afs_add_visited(fs, b->name);
 					if (va->lhs != NULL && b->op <= va->lhs->op)
 						continue;
+					/* Sets to "auto" don't become the LHS, but they mark mark
+					 * the attribute for folding. If no non-auto SET is 
+					 * encountered, an auto LHS value will be calculated. */
+					if (is_auto_mode(b->name, b->mode)) {
+						va->must_fold = true;
+						continue;
+					}
+					/* Overrides must be folded even if there are no modifiers
+					 * so that the folded attribute is visible to searches
+					 * before any subsequent non-override SETs. */
+					if (b->op == AOP_OVERRIDE)
+						va->must_fold = true;
 					amask_or(lhs_this_level, b->name);
 					va->lhs = b;
 				} else {
@@ -491,67 +513,288 @@ static void afs_add_modifiers(AttributeFoldingState *fs, Node *base)
 		/* If we have a complete folding chain for all the requested attributes,
 		 * there's no need to walk up the tree any further. */
 		amask_union(have_lhs, lhs_this_level);
-		if (amask_is_subset(have_lhs, required))
+		if (amask_is_subset(have_lhs, fs->required))
 			break;
 	}
 }
 
+/* Recalculates the style's font ID if font-related attributes have changed. */
+static void afs_maybe_update_font(AttributeFoldingState *fs)
+{
+	if (!fs->must_update_font_id)
+		return;
+
+	/* Start with the descriptor of the inherited font and overwrite 
+	 * fields defined by attributes of the base node. */
+	System *system = fs->base->document->system;
+	const LogicalFont *inherited_descriptor = get_font_descriptor(
+		system, fs->style.text.font_id);
+	if (inherited_descriptor != NULL) {
+		if (!fs->have_font_face) {
+			memcpy(fs->descriptor.face, inherited_descriptor->face, 
+				sizeof(fs->descriptor.face));
+		}
+		if (!fs->have_font_size)
+			fs->descriptor.font_size = inherited_descriptor->font_size;
+	}
+	fs->descriptor.flags = fs->style.flags & FONT_STYLE_MASK;
+
+	/* Make a new font ID from the descriptor. */
+	fs->style.text.font_id = get_font_id(system, &fs->descriptor);
+	fs->style.text.flags = fs->descriptor.flags;
+	fs->text_style_changed = true;
+	fs->must_update_font_id = false;
+}
+
+/* Makes a default LHS value for use when an attribute is undefined. */
+static Attribute *afs_build_auto_value(AttributeFoldingState *fs,
+	AttributeBuffer *abuf, int name)
+{
+	const FontMetrics *metrics = NULL;
+	switch (name) {
+		case TOKEN_PADDING:
+		case TOKEN_PADDING_LEFT:
+		case TOKEN_PADDING_RIGHT:
+		case TOKEN_PADDING_TOP:
+		case TOKEN_PADDING_BOTTOM:
+		case TOKEN_MARGIN:
+		case TOKEN_MARGIN_LEFT:
+		case TOKEN_MARGIN_RIGHT:
+		case TOKEN_MARGIN_TOP:
+		case TOKEN_MARGIN_BOTTOM:
+			return abuf_append_integer(abuf, name, VSEM_NONE, 0);
+		case TOKEN_LEADING:
+			afs_maybe_update_font(fs);
+			metrics = get_font_metrics(fs->base->document->system, 
+				fs->style.text.font_id);
+			return abuf_append_integer(abuf, name, VSEM_NONE, 
+				metrics->height / 8);
+		case TOKEN_INDENT:
+			afs_maybe_update_font(fs);
+			metrics = get_font_metrics(fs->base->document->system, 
+				fs->style.text.font_id);
+			return abuf_append_integer(abuf, name, VSEM_NONE, 
+				metrics->paragraph_indent_width);
+	}
+
+	AttributeSemantic semantic = attribute_semantic(name);
+	switch (semantic) {
+		case ASEM_EDGES:
+			return abuf_append_integer(abuf, name, VSEM_TOKEN, TOKEN_NONE);
+		case ASEM_STRING_SET:
+			return abuf_append_string(abuf, name, VSEM_LIST, "", 0);
+	}
+
+	return NULL;
+}
+
+static bool update_layout_context(Document *document, Node *node, 
+	LayoutContext context);
+
 /* Computes the final value for each visited attribute, storing the results as
  * folded attributes at the start of 'dest'. */
-static void afs_reduce(AttributeFoldingState *fs, AttributeBuffer *dest)
+static void afs_reduce(AttributeFoldingState *fs)
 {
+	Node *base = fs->base;
+	Document *document = base->document;
+	AttributeBuffer *dest = &base->attributes;
+	LayoutContext new_layout = natural_context((NodeType)base->type);
+
+	/* If this is the root, it defines the global text selection colours. */
+	if (base == document->root) {
+		document->selected_text_color = DEFAULT_SELECTED_TEXT_COLOR;
+		document->selected_text_fill_color = DEFAULT_SELECTED_TEXT_FILL_COLOR;
+	}
+
+	/* Fold attributes and update the computed style. */
 	char work_buffer[256];
 	AttributeBuffer working;
 	abuf_init(&working, work_buffer, sizeof(work_buffer));
 	for (unsigned i = 0; i < fs->num_visited; ++i) {
-		VisitedAttribute *va = fs->visited + i;
 		/* A set with no modifiers need not have a folded attribute because it
-		 * will be found by ordinary traversal. If the LHS is an override, we
-		 * make a folded attribute even if there are no modifiers because the
-		 * override must be found before any other set. */
-		if (va->count == 0 && (va->lhs == NULL || va->lhs->op != AOP_OVERRIDE))
-			continue; 
-		/* If the chain no explicit set, the value is undefined unless this
-		 * attribute has a static default LHS. */
-		const Attribute *rhs = fs->sorted_modifiers[va->offset];
-		if (va->lhs == NULL) {
-			va->lhs = attribute_default_value(rhs->name);
-			if (va->lhs == NULL)
-				continue;
+		 * will be found by ordinary traversal. */
+		VisitedAttribute *va = fs->visited + i;
+		Attribute *lhs = (Attribute *)va->lhs;
+		if (va->count != 0 || va->must_fold) {
+			/* If the chain contains no explicit set, the value is undefined 
+			 * unless this attribute has a static default LHS. */
+			if (lhs == NULL) {
+				lhs = afs_build_auto_value(fs, &working, va->name);
+				if (lhs == NULL)
+					continue;
+			} else {
+				lhs = abuf_append(&working, lhs);
+			}
+			/* Fold in any modifiers. */
+			for (unsigned j = 0; j < va->count; ++j) {
+				const Attribute *rhs = fs->sorted_modifiers[va->offset + j];
+				abuf_fold(&working, lhs, rhs, &lhs);
+			}
+			lhs->folded = true;
 		}
-		/* Create a result attribute and fold in the modifiers. */
-		Attribute *lhs = abuf_append(&working, va->lhs);
-		lhs->name = rhs->name; /* Static defaults don't have a name. */
-		lhs->folded = true;
-		for (unsigned j = 0; j < va->count; ++j) {
-			rhs = fs->sorted_modifiers[va->offset + j];
-			abuf_fold(&working, lhs, rhs, &lhs);
+		
+		/* Read the attribute and update the style. */
+		int32_t integer_value;
+		int mode;
+		switch (lhs->name) {
+			case TOKEN_LAYOUT:
+				new_layout = (LayoutContext)abuf_read_mode(lhs, new_layout);
+				break;
+			case TOKEN_FONT:
+				abuf_read_string(lhs, fs->descriptor.face, 
+					sizeof(fs->descriptor.face), NULL, DEFAULT_FONT_FACE);
+				fs->have_font_face = true;
+				fs->must_update_font_id = true;
+				break;
+			case TOKEN_FONT_SIZE:
+				abuf_read_integer(lhs, &fs->descriptor.font_size, 
+					DEFAULT_FONT_SIZE);
+				fs->have_font_size = true;
+				fs->must_update_font_id = true;
+				break;
+			case TOKEN_COLOR:
+				if (abuf_read_integer(lhs, &integer_value) != ADEF_UNDEFINED) {
+					fs->style.text.color = (uint32_t)integer_value;
+					fs->text_style_changed = true;
+				}
+				break;
+			case TOKEN_TINT:
+				if (abuf_read_integer(lhs, &integer_value) != ADEF_UNDEFINED) {
+					fs->style.text.tint = (uint32_t)integer_value;
+					fs->text_style_changed = true;
+				}
+				break;
+			case TOKEN_BOLD:
+				if ((mode = abuf_read_mode(lhs)) != ADEF_UNDEFINED)
+					fs->style.flags = set_or_clear(fs->style.flags, STYLE_BOLD, 
+						(mode == FLAGMODE_TRUE));
+				fs->must_update_font_id = true;
+				break;
+			case TOKEN_ITALIC:
+				if ((mode = abuf_read_mode(lhs)) != ADEF_UNDEFINED)
+					fs->style.flags = set_or_clear(fs->style.flags, 
+						STYLE_ITALIC, (mode == FLAGMODE_TRUE));
+				fs->must_update_font_id = true;
+				break;
+			case TOKEN_UNDERLINE:
+				if ((mode = abuf_read_mode(lhs)) != ADEF_UNDEFINED)
+					fs->style.flags = set_or_clear(fs->style.flags, 
+						STYLE_UNDERLINE, (mode == FLAGMODE_TRUE));
+				fs->must_update_font_id = true;
+				break;
+			case TOKEN_JUSTIFY:
+				if ((mode = abuf_read_mode(lhs)) != ADEF_UNDEFINED)
+					fs->style.justification = (Justification)mode;
+				break;
+			case TOKEN_LEADING:
+				mode = abuf_read_integer(lhs, &integer_value);
+				if (mode > DMODE_AUTO)
+					fs->style.leading = saturate16(integer_value);
+				break;
+			case TOKEN_INDENT:
+				mode = abuf_read_integer(lhs, &integer_value);
+				 if (mode > DMODE_AUTO)
+					fs->style.hanging_indent = saturate16(integer_value);
+				break;
+			case TOKEN_WHITE_SPACE:
+				if ((mode = abuf_read_mode(lhs)) != ADEF_UNDEFINED)
+					fs->style.white_space_mode = (WhiteSpaceMode)mode; 
+				break;
+			case TOKEN_WRAP:
+				if ((mode = abuf_read_mode(lhs)) != ADEF_UNDEFINED)
+					fs->style.wrap_mode = (WrapMode)mode; 
+				break;
+			case TOKEN_ENABLED:
+				if ((mode = abuf_read_mode(lhs)) != ADEF_UNDEFINED)
+					fs->style.flags = set_or_clear(fs->style.flags, STYLE_ENABLED, 
+						(mode == FLAGMODE_TRUE));
+				break;
+			case TOKEN_SELECTION_COLOR:
+				if (base != document->root)
+					continue;
+				abuf_read_integer(lhs, 
+					(int32_t *)&document->selected_text_color, 
+					DEFAULT_SELECTED_TEXT_COLOR);
+				break;
+			case TOKEN_SELECTION_FILL_COLOR:
+				if (base != document->root)
+					continue;
+				abuf_read_integer(lhs, 
+					(int32_t *)&document->selected_text_fill_color, 
+					DEFAULT_SELECTED_TEXT_FILL_COLOR);
+				break;
 		}
 	}
 
-	/* Computed attributes are always at the start of a buffer. Replace any
-	 * existing computed attributes at the start of the destination buffer
-	 * with the attributes in the working buffer. */
+	/* Replace any existing folded attributes at the start of the destination 
+	 * buffer with the attributes in the working buffer. */
 	const Attribute *end = abuf_first(dest);
 	while (end != NULL && end->folded)
 		end = abuf_next(dest, end);
 	abuf_replace_range(dest, abuf_first(dest), end, &working);
 	abuf_clear(&working);
+
+	/* Update the layout mode. If the new mode is no-layout, leave the styles
+	 * as they are. This is a trick to avoid layout when a node is hidden
+	 * and then shown again. It helps in the situtation that the layout 
+	 * attribute is changed by a rule that also applies some other style 
+	 * attributes. If the rule is enabled and disabled to hide and show the
+	 * node, the other styles will change and change back again to no effect. */
+	if (update_layout_context(document, base, new_layout))
+		base->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
+	if (base->layout == LCTX_NO_LAYOUT)
+		fs->style = fs->base->style;
+}
+
+static void afs_init(AttributeFoldingState *fs, Node *base)
+{
+	fs->base = base;
+	fs->num_modifiers = 0;
+	fs->num_visited = 0;
+	memset(fs->required, 0, sizeof(fs->required));
+	fs->inherited = base->parent != NULL ? &base->parent->style : 
+		&DEFAULT_NODE_STYLE;
+	fs->style = *fs->inherited;
+	fs->have_font_face = false;
+	fs->have_font_size = false;
+	fs->text_style_changed = false;
+	fs->must_update_font_id = (fs->style.text.font_id == INVALID_FONT_ID);
+}
+
+static void afs_finalize(AttributeFoldingState *fs)
+{
+	afs_maybe_update_font(fs);
+	if (fs->text_style_changed)
+		update_text_style_key(&fs->style.text);
+	/* Store the final style, invalidating text layers and layout depending on 
+	 * what changed. */
+	Node *base = fs->base;
+	unsigned diff = compare_styles(&fs->style, &base->style);
+	if (diff != 0) {
+		if ((diff & STYLECMP_MUST_RETOKENIZE) != 0)
+			base->flags |= NFLAG_REBUILD_INLINE_CONTEXT;
+		if ((diff & STYLECMP_MUST_RETOKENIZE) != 0)
+			base->flags |= NFLAG_REMEASURE_INLINE_TOKENS;
+		if ((diff & STYLECMP_MUST_REPAINT) != 0) 
+			base->flags |= NFLAG_UPDATE_TEXT_LAYERS;
+		base->style = fs->style;
+	}
 }
 
 /* Recalculates the values of attributes defined by a node or its matched rules
  * that have one or more modifiers, storing the results as folded attributes at 
  * the start of the node's attribute buffer. */
-static bool refold_attributes(Node *base)
+static bool refold_attributes(Document *document, Node *base)
 {
 	if ((base->flags & NFLAG_FOLD_ATTRIBUTES) == 0 && 
-		(base->parent == NULL || !refold_attributes(base->parent)))
+		(base->parent == NULL || !refold_attributes(document, base->parent)))
 		return false;
 	AttributeFoldingState fs;
-	afs_init(&fs);
-	afs_add_modifiers(&fs, base);
+	afs_init(&fs, base);
+	afs_add_modifiers(&fs);
 	afs_sort_modifiers(&fs);
-	afs_reduce(&fs, &base->attributes);
+	afs_reduce(&fs);
+	afs_finalize(&fs);
 	base->flags &= ~NFLAG_FOLD_ATTRIBUTES;
 	return true;
 }
@@ -662,20 +905,13 @@ LayoutContext token_natural_context(int token)
 	return type != LNODE_INVALID ? natural_context(type) : LCTX_NO_LAYOUT;
 }
 
-/* Returns the layout context a node should try to establish. */
-LayoutContext modified_context(const Node *node)
-{
-	LayoutContext natural = natural_context((NodeType)node->type);
-	return (LayoutContext)read_mode(node, TOKEN_LAYOUT, natural);
-}
-
 /* Returns the layout context that a node establishes. */
-static LayoutContext established_context(const Document *document, const Node *node)
+static LayoutContext established_context(const Document *document, 
+	const Node *node, LayoutContext context)
 {
 	document;
 
 	/* Does the node determine its own context? */
-	LayoutContext context = modified_context(node);
 	if (context == LCTX_BLOCK)
 		return LCTX_BLOCK;
 	/* Find the first block or inline node in the parent chain. */
@@ -1377,9 +1613,10 @@ bool is_enabled(const Node *node)
 
 /* Checks for a change in a node's layout attribute and, if required, switches
  * the node's layout to the one requested. */
-static bool update_layout_context(Document *document, Node *node)
+static bool update_layout_context(Document *document, Node *node, 
+	LayoutContext context)
 {
-	LayoutContext new_layout = established_context(document, node);
+	LayoutContext new_layout = established_context(document, node, context);
 	if (new_layout == (LayoutContext)node->layout)
 		return false;
 	destroy_node_boxes(document, node);
@@ -1388,168 +1625,6 @@ static bool update_layout_context(Document *document, Node *node)
 		node->flags |= NFLAG_REBUILD_INLINE_CONTEXT;
 	node->layout = (uint8_t)new_layout;
 	return true;
-}
-
-/* Computes a node's cascaded style. */
-static unsigned update_node_style(Document *document, Node *node, 
-	const NodeStyle *inherited)
-{
-	/* Start with the inherited style. */
-	NodeStyle style = inherited != NULL ? *inherited : DEFAULT_NODE_STYLE;
-	node->flags &= ~NFLAG_UPDATE_STYLE;
-
-	/* Update the layout mode. If the new mode is no-layout, leave the styles
-	 * as they are. This is a trick to avoid layout when a node is hidden
-	 * and then shown again. It helps in the situtation that the layout 
-	 * attribute is changed by a rule that also applies some other style 
-	 * attributes. If the rule is enabled and disabled to hide and show the
-	 * node, the other styles change and then change back again. */
-	unsigned propagate_up = 0;
-	if (update_layout_context(document, node))
-		propagate_up |= NFLAG_RECOMPOSE_CHILD_BOXES;
-	if (node->layout == LCTX_NO_LAYOUT)
-		return propagate_up;
-	
-	/* Override styles defined in the child. */
-	AttributeIterator iterator;
-	int32_t integer_value;
-	LogicalFont descriptor;
-	bool update_font = (style.text.font_id == INVALID_FONT_ID);
-	bool have_font_face = false;
-	bool have_font_size = false;
-	bool text_style_changed = false;
-	int mode;
-	for (const Attribute *attribute = node_first_attribute(node, &iterator);
-		attribute != NULL; attribute = node_next_attribute(&iterator)) {
-
-		/* Read the attribute and update the style. */
-		switch (attribute->name) {
-			case TOKEN_FONT:
-				abuf_read_string(attribute, descriptor.face, 
-					sizeof(descriptor.face), NULL, DEFAULT_FONT_FACE);
-				have_font_face = true;
-				update_font = true;
-				break;
-			case TOKEN_FONT_SIZE:
-				abuf_read_integer(attribute, &descriptor.font_size, 
-					DEFAULT_FONT_SIZE);
-				have_font_size = true;
-				update_font = true;
-				break;
-			case TOKEN_COLOR:
-				if (abuf_read_integer(attribute, &integer_value) != ADEF_UNDEFINED) {
-					style.text.color = (uint32_t)integer_value;
-					text_style_changed = true;
-				}
-				break;
-			case TOKEN_TINT:
-				if (abuf_read_integer(attribute, &integer_value) != ADEF_UNDEFINED) {
-					style.text.tint = (uint32_t)integer_value;
-					text_style_changed = true;
-				}
-				break;
-			case TOKEN_BOLD:
-				if ((mode = abuf_read_mode(attribute)) != ADEF_UNDEFINED)
-					style.flags = set_or_clear(style.flags, STYLE_BOLD, 
-						(mode == FLAGMODE_TRUE));
-				update_font = true;
-				break;
-			case TOKEN_ITALIC:
-				if ((mode = abuf_read_mode(attribute)) != ADEF_UNDEFINED)
-					style.flags = set_or_clear(style.flags, STYLE_ITALIC, 
-						(mode == FLAGMODE_TRUE));
-				update_font = true;
-				break;
-			case TOKEN_UNDERLINE:
-				if ((mode = abuf_read_mode(attribute)) != ADEF_UNDEFINED)
-					style.flags = set_or_clear(style.flags, STYLE_UNDERLINE, 
-						(mode == FLAGMODE_TRUE));
-				update_font = true;
-				break;
-			case TOKEN_JUSTIFY:
-				if ((mode = abuf_read_mode(attribute)) != ADEF_UNDEFINED)
-					style.justification = (Justification)mode;
-				break;
-			case TOKEN_LEADING:
-				mode = abuf_read_integer(attribute, &integer_value);
-				if (mode == DMODE_AUTO)
-					style.leading = -1;
-				else if (mode != ADEF_UNDEFINED)
-					style.leading = saturate16(integer_value);
-				break;
-			case TOKEN_INDENT:
-				mode = abuf_read_integer(attribute, &integer_value);
-				if (mode == DMODE_AUTO)
-					style.hanging_indent = -1;
-				else if (mode != ADEF_UNDEFINED)
-					style.hanging_indent = saturate16(integer_value);
-				break;
-			case TOKEN_WHITE_SPACE:
-				if ((mode = abuf_read_mode(attribute)) != ADEF_UNDEFINED)
-					style.white_space_mode = (WhiteSpaceMode)mode; 
-				break;
-			case TOKEN_WRAP:
-				if ((mode = abuf_read_mode(attribute)) != ADEF_UNDEFINED)
-					style.wrap_mode = (WrapMode)mode; 
-				break;
-			case TOKEN_ENABLED:
-				if ((mode = abuf_read_mode(attribute)) != ADEF_UNDEFINED)
-					style.flags = set_or_clear(style.flags, STYLE_ENABLED, 
-						(mode == FLAGMODE_TRUE));
-				break;
-		}
-	}
-
-	/* If style properties that affect the font have changed, update the node's 
-	 * font ID. */
-	if (update_font) {
-		/* Start with the descriptor of the inherited font and overwrite 
-		 * fields defined by attributes of this node. */
-		const LogicalFont *inherited_descriptor = get_font_descriptor(
-			document->system, style.text.font_id);
-		if (inherited_descriptor != NULL) {
-			if (!have_font_face)
-				memcpy(descriptor.face, inherited_descriptor->face, 
-					sizeof(descriptor.face));
-			if (!have_font_size)
-				descriptor.font_size = inherited_descriptor->font_size;
-		}
-		descriptor.flags = style.flags & FONT_STYLE_MASK;
-		/* Make a new font ID from the descriptor. */
-		style.text.font_id = get_font_id(document->system, &descriptor);
-		style.text.flags = descriptor.flags;
-		text_style_changed = true;
-	}
-	if (text_style_changed) {
-		/* Make a new text style key, which uniquely identifies the 
-		 * (font, colour) tuple for the purpose of bucketing characters that
-		 * can be drawn together. */
-		update_text_style_key(&style.text);
-	}
-
-	/* If this is the root, it defines the document's text selection colours. */
-	if (node == document->root) {
-		read_as_integer(node, TOKEN_SELECTION_COLOR, 
-			(int32_t *)&document->selected_text_color, 
-			DEFAULT_SELECTED_TEXT_COLOR);
-		read_as_integer(node, TOKEN_SELECTION_FILL_COLOR,
-			(int32_t *)&document->selected_text_fill_color, 
-			DEFAULT_SELECTED_TEXT_FILL_COLOR);
-	}
-
-	/* Invalidate text layers and layout depending on what changed. */
-	unsigned diff = compare_styles(&style, &node->style);
-	if (diff != 0) {
-		if ((diff & STYLECMP_MUST_RETOKENIZE) != 0)
-			propagate_up = NFLAG_REBUILD_INLINE_CONTEXT;
-		if ((diff & STYLECMP_MUST_RETOKENIZE) != 0)
-			propagate_up = NFLAG_REMEASURE_INLINE_TOKENS;
-		if ((diff & STYLECMP_MUST_REPAINT) != 0) 
-			propagate_up = NFLAG_UPDATE_TEXT_LAYERS;
-		node->flags |= propagate_up;
-		node->style = style;
-	}
-	return propagate_up;
 }
 
 /* Returns the first node in a parent chain, including 'node' itself, that
@@ -1700,8 +1775,7 @@ static void compose_child_boxes(Document *document, Node *node)
 
 /* Recursively updates nodes before layout. */
 unsigned update_nodes_pre_layout(Document *document, Node *node, 
-	unsigned propagate_down, const NodeStyle *inherited, 
-	bool rule_tables_changed)
+	unsigned propagate_down, bool rule_tables_changed)
 {
 	unsigned propagate_up = 0;
 	node->flags |= propagate_down;
@@ -1732,9 +1806,9 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 	
 	/* When a node's style is changed, the styles of its children must be 
 	 * recalculated. */
-	if ((node->flags & NFLAG_UPDATE_STYLE) != 0) {
-		propagate_up |= update_node_style(document, node, inherited);
-		propagate_down |= NFLAG_UPDATE_STYLE;
+	if ((node->flags & NFLAG_FOLD_ATTRIBUTES) != 0) {
+		refold_attributes(document, node);
+		propagate_down |= NFLAG_FOLD_ATTRIBUTES;
 	}
 
 	if ((node->flags & NFLAG_UPDATE_BACKGROUND_LAYERS) != 0) {
@@ -1743,13 +1817,15 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 	}
 
 	/* Process our children. */
-	const NodeStyle *parent_style = &node->style;
 	for (Node *child = node->first_child; child != NULL; 
 		child = child->next_sibling) {
 		propagate_up |= update_nodes_pre_layout(document, child, 
-			propagate_down, parent_style, rule_tables_changed);
+			propagate_down, rule_tables_changed);
 	}
 
+	/* Some flags propagate up automatically. */
+	propagate_up |= (node->flags & (NFLAG_UPDATE_TEXT_LAYERS | 
+		NFLAG_REMEASURE_INLINE_TOKENS | NFLAG_REBUILD_INLINE_CONTEXT));
 	node->flags |= propagate_up;
 
 	/* Rebuild this node's box. */
