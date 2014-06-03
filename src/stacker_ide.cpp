@@ -1178,7 +1178,7 @@ bool gui_structure_change_test_handle_message(GuiState *state,
 {
 	lp;
 
-	static const unsigned APPEND_COUNT = 1;
+	static const unsigned APPEND_COUNT = 50000;
 
 	Document *document = state->document;
 
@@ -1939,8 +1939,6 @@ void ide(void)
 
 int main(int argc, char *argv[])
 {
-	_CrtSetDbgFlag ( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
-
 	argc; argv;
 	stkr::ide();
 

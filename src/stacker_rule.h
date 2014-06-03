@@ -36,7 +36,8 @@ struct Rule {
 	AttributeBuffer attributes;
 };
 
-typedef std::unordered_multimap<uint64_t, Selector *> RuleTable;
+typedef std::unordered_multimap<uint64_t, Selector *, 
+	std::identity<uint64_t>> RuleTable;
 
 int add_rule_from_attributes(
 	Rule **result, 

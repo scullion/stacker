@@ -782,6 +782,10 @@ static void afs_finalize(AttributeFoldingState *fs)
 	}
 }
 
+/* Disable debug initialization of AttributeFoldingState which makes debug
+ * builds extremely slow. */
+#pragma runtime_checks("", off)
+
 /* Recalculates the values of attributes defined by a node or its matched rules
  * that have one or more modifiers, storing the results as folded attributes at 
  * the start of the node's attribute buffer. */
@@ -1895,6 +1899,10 @@ unsigned update_nodes_post_layout(Document *document, Node *node,
 	}
 	return propagate_up;
 }
+
+/* Disable initialization of large stack arrays which makes debug builds 
+ * very slow. */
+#pragma runtime_checks("", off)
 
 /* A second box building pass that constructs line boxes for paragraphs and
  * performs paragraph layout. This has to be done in a second pass because the 

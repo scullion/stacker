@@ -60,6 +60,10 @@ void paragraph_append(Paragraph *paragraph, ParagraphElementType type,
 	paragraph->num_elements++;
 }
 
+/* Disable initialization of large stack arrays which makes debug builds 
+ * very slow. */
+#pragma runtime_checks("", off)
+
 /* Computes a list of places to break a paragraph into lines. This is a simple 
  * implementation of the Knuth-Plass optimal fit algorithm [1].
  * 
