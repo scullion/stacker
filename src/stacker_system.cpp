@@ -200,6 +200,14 @@ static void initialize_url_notifications(System *system, UrlCache *url_cache)
 	}
 }
 
+static void deinitialize_url_notifications(System *system, UrlCache *url_cache)
+{
+	if (url_cache != NULL) {
+		url_cache->remove_notify_sink(system->image_layer_notify_id);
+		url_cache->remove_notify_sink(system->document_notify_id);
+	}
+}
+
 int16_t get_debug_label_font_id(System *system)
 {
 	if (system->debug_label_font_id == INVALID_FONT_ID) {
@@ -235,6 +243,7 @@ void destroy_system(System *system)
 	clear_rule_table(&system->global_rules);
 	for (unsigned i = 0; i < system->font_cache_entries; ++i)
 		platform_release_font(system->back_end, system->font_cache[i].handle);
+	deinitialize_url_notifications(system, system->url_cache);
 	delete system;
 }
 
