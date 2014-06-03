@@ -41,7 +41,7 @@ struct NetworkImage {
 	unsigned use_count;
 };
 
-const unsigned RENDER_CACHE_CAPACITY = 65536;
+const unsigned RENDER_CACHE_CAPACITY = 64;
 
 struct TextRunCacheEntry {
 	uint64_t key;
@@ -184,7 +184,7 @@ void platform_release_font(BackEnd *back_end, void *handle)
 			bef->face->Release();
 		if (bef->font != NULL)
 			bef->font->Release();
-		delete [] bef;
+		delete bef;
 	}
 }
 
@@ -301,6 +301,7 @@ static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const char *text,
 	delete [] text_properties;
 	delete [] glyph_properties;
 	delete [] glyph_offsets;
+	delete [] text_utf16;
 
 	analyzer->Release();
 

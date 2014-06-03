@@ -653,7 +653,7 @@ void destroy_box(Document *document, Box *box, bool destroy_children)
 	} else {
 		remove_all_children(document, box);
 	}
-	delete [] (char *)box;
+	delete box;
 }
 
 void destroy_sibling_chain(Document *document, Box *first, 
