@@ -133,6 +133,8 @@ Node *last_child(Node *node)
 	return node->last_child;
 }
 
+static bool refold_attributes(Document *document, Node *base);
+
 /* Searches for an attribute in the buffers of a node and its matched rules. */
 const Attribute *find_attribute(const Node *node, int name)
 {
@@ -146,6 +148,7 @@ const Attribute *find_attribute(const Node *node, int name)
 /* Searches for an attribute in a node's private attribute buffer. */
 const Attribute *find_attribute_no_rules(const Node *node, int name)
 {
+	refold_attributes((Document *)node->document, (Node *)node);
 	const Attribute *attribute = abuf_first(&node->attributes);
 	while (attribute != NULL && (attribute->name != name || 
 		attribute->op > AOP_OVERRIDE))
@@ -329,8 +332,6 @@ static unsigned sort_attribute_buffers(const Node *node,
 		buffers[num_buffers++] = nb;
 	return num_buffers;
 }
-
-static bool refold_attributes(Document *document, Node *base);
 
 const Attribute *node_first_attribute(const Node *node, AttributeIterator *ai)
 {
@@ -1336,6 +1337,10 @@ static void update_node_rule_keys(Document *document, Node *node,
 	bool ignore_class_modifiers = false)
 {
 	uint64_t keys[MAX_NODE_RULE_KEYS];
+
+	/* The class and the set of matched rules have a reciprocal relationship.
+	 * To break the cycle we use a version of the class attribute that is not 
+	 * modified by rules in the first iteration of rule matching. */
 	const char *cls = NULL;
 	unsigned cls_length = 0;
 	if (ignore_class_modifiers) {
@@ -1344,6 +1349,7 @@ static void update_node_rule_keys(Document *document, Node *node,
 	} else {
 		read_as_string(node, TOKEN_CLASS, &cls, &cls_length);
 	}
+	
 	unsigned num_keys = make_node_rule_keys(document->system, 
 		(Token)node->token, node->flags, cls, cls_length, 
 		keys, MAX_NODE_RULE_KEYS);
@@ -1779,6 +1785,13 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 	node->flags |= propagate_down;
 
 	update_node_debug_string(document, node);
+
+	/* FIXME (TJM): matched rules depend on the class. the class depends on
+	 * attribute folding. attribute folding depends on rule matching having
+	 * been performed, which depends on the class... 
+	 * 
+	 * we repeatedly read the class attribute, but we can't expect it to actually
+	 * change unless we refold attributes. */
 
 	if (rule_tables_changed)
 		node->flags |= NFLAG_UPDATE_MATCHED_RULES;
