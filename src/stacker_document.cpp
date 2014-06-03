@@ -850,13 +850,16 @@ unsigned document_fetch_notify_callback(UrlHandle handle,
 	UrlFetchState fetch_state)
 {
 	key; handle; system;
-	if (type != URL_NOTIFY_FETCH)
-		return 0;
-	if (fetch_state == URL_FETCH_SUCCESSFUL || 
-		fetch_state == URL_FETCH_DISK) {
-		poll_url_handle(document);
-	} else if (fetch_state == URL_FETCH_FAILED) {
-		set_navigation_state(document, DOCNAV_FAILED);
+	if (type == URL_NOTIFY_FETCH) {
+		if (fetch_state == URL_FETCH_SUCCESSFUL || 
+			fetch_state == URL_FETCH_DISK) {
+			poll_url_handle(document);
+		} else if (fetch_state == URL_FETCH_FAILED) {
+			set_navigation_state(document, DOCNAV_FAILED);
+		}
+	} else if (type == URL_NOTIFY_EVICT) {
+		system->url_cache->destroy_handle(handle);
+		document->url_handle = urlcache::INVALID_URL_HANDLE;
 	}
 	return 0;
 }
