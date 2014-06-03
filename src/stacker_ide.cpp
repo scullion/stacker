@@ -1875,11 +1875,14 @@ static void gui_init(GuiState *state)
 
 static void gui_deinit(GuiState *state)
 {
-	d2d_deinit(state->back_end);
+	for (unsigned i = 0; i < state->sample_resource_names.size(); ++i)
+		delete [] state->sample_resource_names[i];
+	delete [] state->source;
 	DeleteObject(state->fixed_font);
 	destroy_view(state->view);
 	destroy_document(state->document);
 	destroy_system(state->system);
+	d2d_deinit(state->back_end);
 	delete state->url_cache;
 }
 
