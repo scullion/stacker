@@ -172,6 +172,6 @@ bool compute_box_sizes(Document *document, Box *box, bool post_text_layout);
 void compute_box_bounds(Document *document, Box *box);
 void clear_box_tree_flags(Document *document, Box *box, unsigned mask);
 void update_box_clip(Document *document, Box *box, 
-	const float *parent_clip, int depth);
+	const float *parent_clip, int depth, bool must_update = false);
 
 } // namespace stkr

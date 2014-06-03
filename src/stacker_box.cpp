@@ -467,6 +467,11 @@ bool set_provisional_size(Document *document, Box *box, Axis axis,
 			propagate_expansion_flags(box->owner, 1 << axis);
 		}
 
+		/* The box's clip rectangle and the clip rectangles of all its children
+		 * must be recalculated. */
+		box->flags &= ~BOXFLAG_TREE_CLIP_VALID;
+		clear_in_parents |= BOXFLAG_TREE_CLIP_VALID;
+
 		/* Log a helpful message. */
 		const char *source_name = (source == PSS_ABOVE) ? "parent" : 
 			(source == PSS_BELOW ? "child" : "init");
@@ -966,9 +971,9 @@ void clear_box_tree_flags(Document *document, Box *box, unsigned mask)
 
 /* Updates clip rectangles and depth values for a box subtree. */
 void update_box_clip(Document *document, Box *box, const float *parent_clip, 
-	int depth)
+	int depth, bool must_update)
 {
-	if ((box->flags & BOXFLAG_TREE_CLIP_VALID) != 0) 
+	if (!must_update && (box->flags & BOXFLAG_TREE_CLIP_VALID) != 0) 
 		return;
 	build_clip_rectangle(box, box->clip);
 	intersect(parent_clip, box->clip, box->clip);
@@ -976,7 +981,7 @@ void update_box_clip(Document *document, Box *box, const float *parent_clip,
 	depth += box->depth_interval;
 	for (Box *child = box->first_child; child != NULL; 
 		child = child->next_sibling)
-		update_box_clip(document, child, box->clip, depth);
+		update_box_clip(document, child, box->clip, depth, true);
 	box->flags |= BOXFLAG_TREE_CLIP_VALID;
 }
 
