@@ -418,7 +418,7 @@ static void view_draw_box_label(View *view, const char *label, unsigned length,
 	TextCommandData *td = (TextCommandData *)view_add_command(view, DCMD_TEXT,
 		required, NOT_CLIPPED, depth++);
 	if (td == NULL)
-		return;
+		goto cleanup;
 
 	char *block = (char *)(td + 1);
 	td->text = block;
@@ -448,6 +448,9 @@ static void view_draw_box_label(View *view, const char *label, unsigned length,
 	}
 	((uint16_t *)td->flags)[0] = TLF_LINE_HEAD | TLF_SEGMENT_HEAD | 
 		TLF_STYLE_HEAD;
+
+cleanup:
+
 	delete [] label_advances;
 }
 
