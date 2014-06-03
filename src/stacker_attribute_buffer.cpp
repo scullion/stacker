@@ -1207,7 +1207,7 @@ static int abuf_fold(
 		if (ea->header.size != size_b)
 			ea = abuf_resize_entry(abuf, ea, size_b);
 		ea->header.mode = mode_b;
-		ea->header.folded = true;
+		ea->header.folded = false;
 		ea->header.op = op_b;
 		ea->header.size = size_b;
 		ea->header.type = type_b;
@@ -1317,7 +1317,7 @@ static int abuf_fold(
 		if (type_a == STORAGE_NONE) {
 			ea = abuf_resize_entry(abuf, ea, size_b);
 			ea->header.mode = mode_b;
-			ea->header.folded = true;
+			ea->header.folded = false;
 			ea->header.op = op_b;
 			ea->header.size = size_b;
 			ea->header.type = type_b;
@@ -1353,8 +1353,6 @@ static int abuf_fold(
 			changed = length_ab != length_a;
 		} 
 	}
-
-	ea->header.folded = true;
 	ea->header.op = result_op;
 	if (out_folded != NULL)
 		*out_folded = ea;
