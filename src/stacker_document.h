@@ -22,6 +22,9 @@ struct Document {
 	unsigned change_clock_at_layout;
 	unsigned root_dims[2];
 
+	/* Box free list. */
+	Box *free_boxes;
+
 	/* Rules. */
 	RuleTable rules;
 	unsigned global_rule_table_revision;

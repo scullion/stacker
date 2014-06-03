@@ -572,7 +572,15 @@ Box *create_box(Document *document, Node *owner)
 {
 	document->system->total_boxes++;
 	
-	Box *box = new Box();
+	Box *box = document->free_boxes;
+	if (box != NULL) {
+		document->free_boxes = box->next_sibling;
+		box->next_sibling = NULL;
+		memset(box, 0, sizeof(Box));
+	} else {
+		box = new Box();
+	}
+
 	box->owner = owner;
 	box->parent = NULL;
 	box->first_child = NULL;
@@ -590,7 +598,6 @@ Box *create_box(Document *document, Node *owner)
 	box->cell_code = INVALID_CELL_CODE;
 	box->cell_prev = NULL;
 	box->cell_next = NULL;
-
 	return box;
 }
 
@@ -656,7 +663,8 @@ void destroy_box(Document *document, Box *box, bool destroy_children)
 	} else {
 		remove_all_children(document, box);
 	}
-	delete box;
+	box->next_sibling = document->free_boxes;
+	document->free_boxes = box;
 }
 
 void destroy_sibling_chain(Document *document, Box *first, 

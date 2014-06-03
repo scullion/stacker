@@ -1178,7 +1178,7 @@ bool gui_structure_change_test_handle_message(GuiState *state,
 {
 	lp;
 
-	static const unsigned APPEND_COUNT = 5000;
+	static const unsigned APPEND_COUNT = 500;
 
 	Document *document = state->document;
 

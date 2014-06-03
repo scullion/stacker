@@ -659,6 +659,7 @@ Document *create_document(System *system, unsigned flags)
 	document->layout_clock = 0;
 	document->change_clock = 0;
 	document->change_clock_at_layout = unsigned(-1);
+	document->free_boxes = NULL;
 	document->hit_clock = 0;
 	document->flags = flags;
 	document->root_dims[AXIS_H] = 0;
@@ -681,8 +682,18 @@ Document *create_document(System *system, unsigned flags)
 	return document;
 }
 
+static void clear_box_free_list(Document *document)
+{
+	while (document->free_boxes != NULL) {
+		Box *box = document->free_boxes;
+		document->free_boxes = box->next_sibling;
+		delete box;
+	}
+}
+
 void destroy_document(Document *document)
 {
+	clear_box_free_list(document);
 	clear_document(document);
 	deinit_message_queue(&document->message_queue);
 	grid_deinit(&document->grid);
