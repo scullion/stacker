@@ -801,11 +801,9 @@ static bool refold_attributes(Document *document, Node *base)
 
 void attribute_changed(Document *document, Node *node, int name)
 {
-	node->flags |= NFLAG_FOLD_ATTRIBUTES;
+	set_node_flags(document, node, NFLAG_FOLD_ATTRIBUTES, true);
 	if (is_background_attribute(name))
 		set_node_flags(document, node, NFLAG_UPDATE_BACKGROUND_LAYERS, true);
-	if (is_cascaded_style_attribute(name))
-		set_node_flags(document, node, NFLAG_UPDATE_STYLE, true);
 	if (is_layout_attribute(name))
 		set_node_flags(document, node, NFLAG_REBUILD_BOXES, true);
 	if (name == TOKEN_CLASS)
@@ -1197,7 +1195,6 @@ int create_node(Node **result, Document *document, NodeType type, int tag_name,
 		NFLAG_UPDATE_TEXT_LAYERS | 
 		NFLAG_UPDATE_BACKGROUND_LAYERS | 
 		NFLAG_FOLD_ATTRIBUTES |
-		NFLAG_UPDATE_STYLE | 
 		NFLAG_REBUILD_BOXES | 
 		NFLAG_UPDATE_MATCHED_RULES |
 		NFLAG_HAS_STATIC_TEXT |
@@ -1381,7 +1378,7 @@ static bool update_rule_slots(Document *document, Node *node)
 	node->num_matched_rules = (uint8_t)num_matched;
 	node->flags &= ~NFLAG_UPDATE_MATCHED_RULES;
 	if (changed) 
-		node->flags |= NFLAG_FOLD_ATTRIBUTES | NFLAG_UPDATE_STYLE;
+		node->flags |= NFLAG_FOLD_ATTRIBUTES;
 	return changed;
 }
 
@@ -1399,7 +1396,7 @@ static void check_rule_slots(Document *document, Node *node)
 		}
 	}
 	if (rules_changed)
-		node->flags |= NFLAG_FOLD_ATTRIBUTES | NFLAG_UPDATE_STYLE;
+		node->flags |= NFLAG_FOLD_ATTRIBUTES;
 }
 
 /* If necessary, rebuilds a node's rule keys from its class attribute and 
@@ -1584,7 +1581,7 @@ static void handle_node_parent_changed(Document  *document, Node *node)
 {
 	document;
 	/* Effective layout depends on tree position. */
-	node->flags |= NFLAG_UPDATE_STYLE;
+	node->flags |= NFLAG_FOLD_ATTRIBUTES;
 }
 
 /* Synchronizes a node's background and image layers with its attributes. */
@@ -1795,7 +1792,7 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 	if ((node->flags & NFLAG_PARENT_CHANGED) != 0) {
 		handle_node_parent_changed(document, node);
 		node->flags &= ~NFLAG_PARENT_CHANGED;
-		node->flags |= NFLAG_REBUILD_BOXES | NFLAG_UPDATE_STYLE;
+		node->flags |= NFLAG_FOLD_ATTRIBUTES | NFLAG_REBUILD_BOXES;
 		propagate_up |= NFLAG_REBUILD_INLINE_CONTEXT;
 	}
 
