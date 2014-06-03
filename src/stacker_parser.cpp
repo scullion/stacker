@@ -504,7 +504,6 @@ static int add_text_node(Parser *parser)
 {
 	if (parser->scope == NULL)
 		return parser_error(parser, STKR_INCORRECT_CONTEXT);
-
 	unsigned unescaped_length = parser->token_value.string.length - 
 		parser->token_escape_count;
 	Node *node = NULL;
@@ -608,8 +607,6 @@ static int parse_text(Parser *parser, bool in_block = true)
 
 		/* Start a new paragraph if required. */
 		if (open_paragraph && !have_paragraph) {
-			if (parser->scope == NULL)
-				return parser_error(parser, STKR_INCORRECT_CONTEXT);
 			Node *paragraph = NULL;
 			rc = create_node(&paragraph, parser->document, LNODE_PARAGRAPH, 
 				TOKEN_PARAGRAPH);
@@ -659,7 +656,7 @@ static int interpret_tag(Parser *parser, int tag_name,
 		return STKR_OK_NO_SCOPE;
 	} else {
 		/* Only rules can be parsed outside a document context. */
-		if (parser->scope == NULL)
+		if (parser->document == NULL)
 			return parser_error(parser, STKR_INCORRECT_CONTEXT);
 		NodeType node_type = node_type_for_tag(tag_name);
 		if (node_type == LNODE_INVALID)
