@@ -91,20 +91,6 @@ static void d2d_trc_init(BackEnd *back_end)
 	back_end->run_cache_clock = 0;
 }
 
-static void d2d_trc_clear(BackEnd *back_end)
-{
-	for (unsigned i = 0; i < RENDER_CACHE_CAPACITY; ++i) {
-		TextRunCacheEntry *entry = back_end->run_cache + i;
-		if (entry->key != 0ULL) {
-			entry->key = 0ULL;
-			delete [] entry->glyph_advances;
-			delete [] entry->glyph_indices;
-		}
-	}
-	back_end->num_run_cache_entries = 0;
-	back_end->run_cache_clock = 0;
-}
-
 static void d2d_check(HRESULT hr, const char *op = "Direct2D call")
 {
 	if (SUCCEEDED(hr))
@@ -188,6 +174,25 @@ void platform_release_font(BackEnd *back_end, void *handle)
 	}
 }
 
+static void d2d_trc_clear_entry(TextRunCacheEntry *entry)
+{
+	if (entry->key != 0ULL) {
+		delete [] entry->glyph_indices;
+		delete [] entry->glyph_advances;
+		entry->glyph_indices = NULL;
+		entry->glyph_advances = NULL;
+		entry->key = 0ULL;
+	}
+}
+
+static void d2d_trc_clear(BackEnd *back_end)
+{
+	for (unsigned i = 0; i < RENDER_CACHE_CAPACITY; ++i)
+		d2d_trc_clear_entry(back_end->run_cache + i);
+	back_end->num_run_cache_entries = 0;
+	back_end->run_cache_clock = 0;
+}
+
 static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const char *text, 
 	unsigned length, BackEndFont *bef)
 {
@@ -218,19 +223,20 @@ static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const char *text,
 		if (lru_entry != NULL) {
 			entry = lru_entry;
 		} else {
-			key = 0ULL;
+			/* The cache is full but we hit an empty slot. Bump out another
+			 * entry at random. */
+			do {
+				index = (index + 1) % RENDER_CACHE_CAPACITY;
+				lru_entry = back_end->run_cache + index;
+			} while (lru_entry->key == 0ULL);
+			d2d_trc_clear_entry(lru_entry);
 		}
 	} else {
 		back_end->num_run_cache_entries++;
 	}
 
 	/* If this entry has been used before, delete the existing data. */
-	if (entry->key != 0ULL) {
-		delete [] entry->glyph_indices;
-		delete [] entry->glyph_advances;
-		entry->glyph_indices = NULL;
-		entry->glyph_advances = NULL;
-	}
+	d2d_trc_clear_entry(entry);
 
 	/* Convert the text to UTF-16. */
 	const char *src = text;
