@@ -851,7 +851,7 @@ void d2d_deinit(BackEnd *be)
 {
 	d2d_trc_clear(be);
 	if (be->image_notify_id != INVALID_NOTIFY_SINK_ID)
-		be->url_cache->set_notify_sink_data(be->image_notify_id, NULL, NULL);
+		be->url_cache->remove_notify_sink(be->image_notify_id);
 	if (be->d2d_rt != NULL)
 		be->d2d_rt->Release();
 	if (be->dw_factory != NULL)
