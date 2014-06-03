@@ -1786,19 +1786,11 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 
 	update_node_debug_string(document, node);
 
-	/* FIXME (TJM): matched rules depend on the class. the class depends on
-	 * attribute folding. attribute folding depends on rule matching having
-	 * been performed, which depends on the class... 
-	 * 
-	 * we repeatedly read the class attribute, but we can't expect it to actually
-	 * change unless we refold attributes. */
-
 	if (rule_tables_changed)
 		node->flags |= NFLAG_UPDATE_MATCHED_RULES;
 	if ((node->flags & (NFLAG_UPDATE_RULE_KEYS | 
 		NFLAG_UPDATE_MATCHED_RULES)) != 0) {
 		update_matched_rules(document, node);
-		node->flags |= NFLAG_UPDATE_MATCHED_RULES;
 		propagate_down |= NFLAG_UPDATE_MATCHED_RULES;
 	}
 	check_rule_slots(document, node);
