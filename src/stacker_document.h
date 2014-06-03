@@ -32,7 +32,7 @@ struct Document {
 	uint32_t selected_text_fill_color;
 
 	/* Box quadtree. */
-	GridHash box_quadtree;
+	Grid grid;
 	unsigned box_query_stamp;
 	
 	/* Node hit testing. */

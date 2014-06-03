@@ -106,7 +106,7 @@ struct Box {
 	uint16_t depth_interval;
 	uint16_t depth;
 	
-	struct GridCell *cell;
+	unsigned cell_code;
 	Box *cell_prev;
 	Box *cell_next;
 

@@ -7,15 +7,23 @@ namespace stkr {
 struct Document;
 struct Box;
 
+const unsigned INVALID_CELL_CODE = 0;
+
 struct GridCell {
-	struct Box *boxes;
 	unsigned code;
+	struct Box *boxes;
 	unsigned num_boxes;
 	unsigned query_stamp;
 };
 
-typedef std::unordered_map<unsigned, GridCell> GridHash;
+struct Grid {
+	GridCell *cells;
+	unsigned num_cells;
+	unsigned capacity;
+};
 
+void grid_init(Grid *grid);
+void grid_deinit(Grid *grid);
 void grid_remove(Document *document, Box *box);
 void grid_insert(Document *document, Box *box);
 unsigned grid_query_rect(Document *document, Box **result, 

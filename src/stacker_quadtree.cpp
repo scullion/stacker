@@ -12,9 +12,13 @@ namespace stkr {
 
 const unsigned GRID_DEPTH = 4;
 const unsigned GRID_LOG_PITCH[GRID_DEPTH] = { 15, 11, 8, 6 };
-const unsigned GRID_COORD_MASK  = 0x7FFF;
-const unsigned GRID_COORD_SHIFT = 15;
-const unsigned GRID_LEVEL_SHIFT = 30;
+const unsigned GRID_COORD_MASK    = 0x3FFF;
+const unsigned GRID_LEVEL_MASK    = 7;
+const unsigned GRID_COORD_SHIFT   = 14;
+const unsigned GRID_LEVEL_SHIFT   = 28;
+const unsigned GRID_CODE_BIT      = 1u << 31;
+const unsigned GRID_CODE_EMPTY    = 0;
+const unsigned GRID_CODE_SENTINEL = 1;
 
 static int grid_i(unsigned code)
 {
@@ -28,12 +32,12 @@ static int grid_j(unsigned code)
 
 static unsigned grid_level_from_code(unsigned code)
 {
-	return (code >> GRID_LEVEL_SHIFT);
+	return (code >> GRID_LEVEL_SHIFT) & GRID_LEVEL_MASK;
 }
 
 static unsigned grid_log_pitch_from_code(unsigned code)
 {
-	return GRID_LOG_PITCH[code >> GRID_LEVEL_SHIFT];
+	return GRID_LOG_PITCH[grid_level_from_code(code)];
 }
 
 static unsigned grid_cell_code(int x, int y, unsigned level)
@@ -41,31 +45,12 @@ static unsigned grid_cell_code(int x, int y, unsigned level)
 	unsigned shift = GRID_LOG_PITCH[level];
 	unsigned ci = (x >> shift) & GRID_COORD_MASK;
 	unsigned cj = (y >> shift) & GRID_COORD_MASK;
-	unsigned code = (level << GRID_LEVEL_SHIFT) + (cj << GRID_COORD_SHIFT) + ci;
+	unsigned code = (cj << GRID_COORD_SHIFT) + ci;
+	code |= level << GRID_LEVEL_SHIFT;
+	code |= GRID_CODE_BIT;
 	assertb(grid_log_pitch_from_code(code) == GRID_LOG_PITCH[level]);
 	assertb(grid_level_from_code(code) == level);
 	return code;
-}
-
-void grid_remove(Document *document, Box *box)
-{
-	document;
-
-	GridCell *cell = box->cell;
-	if (cell == NULL)
-		return;
-	if (box->cell_prev != NULL) {
-		box->cell_prev->cell_next = box->cell_next;
-	} else {
-		cell->boxes = box->cell_next;
-	}
-	if (box->cell_next != NULL) {
-		box->cell_next->cell_prev = box->cell_prev;
-	}
-	box->cell_prev = NULL;
-	box->cell_next = NULL;
-	box->cell = NULL;
-	cell->num_boxes--;
 }
 
 static unsigned grid_level(unsigned diameter)
@@ -77,25 +62,154 @@ static unsigned grid_level(unsigned diameter)
 	return level;
 }
 
-void grid_insert(Document *document, Box *box)
+static unsigned box_cell_code(const Box *box)
 {
 	float x0, x1, y0, y1;
 	outer_rectangle(box, &x0, &x1, &y0, &y1);
 	unsigned diameter = unsigned(std::max(x1 - x0, y1 - y0));
 	int cx = int(0.5f * (x0 + x1));
 	int cy = int(0.5f * (y0 + y1));
-
 	unsigned level = grid_level(diameter);
-	unsigned cell_code = grid_cell_code(cx, cy, level); 
-	GridCell *cell = &document->box_quadtree[cell_code];
-	if (cell != box->cell) {
-		cell->code = cell_code;
+	return grid_cell_code(cx, cy, level); 
+}
+
+
+void grid_init(Grid *grid)
+{
+	grid->cells = NULL;
+	grid->num_cells = 0;
+	grid->capacity = 0;
+}
+
+void grid_deinit(Grid *grid)
+{
+	delete [] grid->cells;
+	grid->num_cells = 0;
+	grid->capacity = 0;
+}
+
+static void grid_set_capacity(Grid *grid, unsigned new_capacity);
+
+inline unsigned hash_cell_code(unsigned cell_code)
+{
+	unsigned key = cell_code * 0xcc9e2d51;
+	key = (key << 15) | (key >> 17);
+	return key * 5 + 0xe6546b64;
+}
+
+static GridCell *grid_find_cell(Grid *grid, unsigned cell_code)
+{
+	if (grid->num_cells == 0)
+		return NULL;
+	unsigned mask = grid->capacity - 1;
+	unsigned index = hash_cell_code(cell_code) & mask;
+	for (unsigned probe = 0; ; ++probe) {
+		GridCell *cell = grid->cells + index;
+		if (cell->code == cell_code)
+			return cell;
+		if (cell->code == GRID_CODE_EMPTY)
+			break;
+		unsigned distance = (index - hash_cell_code(cell->code)) & mask;
+		if (probe > distance)
+			break;
+		index = (index + 1) & mask;
+	}
+	return NULL;
+}
+
+inline unsigned grid_new_capacity(unsigned capacity)
+{
+	return capacity < 64 ? 64 : next_power_of_two(capacity + 1);
+}
+
+static GridCell *grid_insert_cell(Grid *grid, unsigned cell_code, 
+	Box *boxes = NULL, unsigned num_boxes = 0, unsigned query_stamp = 0)
+{
+	if (grid->num_cells * 3 / 2 >= grid->capacity)
+		grid_set_capacity(grid, grid_new_capacity(grid->capacity));
+	unsigned mask = grid->capacity - 1;
+	unsigned index = hash_cell_code(cell_code) & mask;
+	GridCell *inserted_cell = NULL;
+	for (unsigned probe = 0; ; ++probe) {
+		GridCell *cell = grid->cells + index;
+		if ((cell->code & GRID_CODE_BIT) == 0) {
+			grid->num_cells += (cell->code == GRID_CODE_EMPTY);
+			cell->code = cell_code;
+			cell->boxes = boxes;
+			cell->num_boxes = num_boxes;
+			cell->query_stamp = query_stamp;
+			if (inserted_cell == NULL)
+				inserted_cell = cell;
+			break;
+		} else if (cell->code == cell_code) {
+			inserted_cell = cell;
+			break;
+		}
+		unsigned distance = (index - hash_cell_code(cell->code)) & mask;
+		if (probe > distance) {
+			std::swap(cell_code, cell->code);
+			std::swap(boxes, cell->boxes);
+			std::swap(num_boxes, cell->num_boxes);
+			std::swap(query_stamp, cell->query_stamp);
+			if (inserted_cell == NULL)
+				inserted_cell = cell;
+			probe = distance;
+		}
+		index = (index + 1) & mask;
+	}
+	return inserted_cell;
+}
+
+static void grid_set_capacity(Grid *grid, unsigned new_capacity)
+{
+	unsigned old_capacity = grid->capacity;
+	GridCell *old_cells = grid->cells;
+	grid->cells = new GridCell[new_capacity];
+	memset(grid->cells, 0, new_capacity * sizeof(GridCell));
+	grid->capacity = new_capacity;
+	grid->num_cells = 0;
+ 	for (unsigned i = 0; i < old_capacity; ++i) {
+		const GridCell *old_cell = old_cells + i;
+		if ((old_cell->code & GRID_CODE_BIT) != 0) {
+			grid_insert_cell(grid, old_cell->code, old_cell->boxes, 
+				old_cell->num_boxes, old_cell->query_stamp);
+		}
+	}
+	delete [] old_cells;
+}
+
+void grid_remove(Document *document, Box *box)
+{
+	if (box->cell_code == INVALID_CELL_CODE)
+		return;
+	GridCell *cell = grid_find_cell(&document->grid, box->cell_code);
+	assertb(cell != NULL && cell->num_boxes != 0);
+	if (box->cell_prev != NULL) {
+		box->cell_prev->cell_next = box->cell_next;
+	} else {
+		cell->boxes = box->cell_next;
+	}
+	if (box->cell_next != NULL) {
+		box->cell_next->cell_prev = box->cell_prev;
+	}
+	box->cell_prev = NULL;
+	box->cell_next = NULL;
+	box->cell_code = INVALID_CELL_CODE;
+	assertb(cell->num_boxes != 0);
+	cell->num_boxes--;
+}
+
+void grid_insert(Document *document, Box *box)
+{
+	unsigned cell_code = box_cell_code(box); 
+	GridCell *cell = grid_insert_cell(&document->grid, cell_code);
+	if (cell_code != box->cell_code) {
 		grid_remove(document, box);
 		if (cell->boxes != NULL)
 			cell->boxes->cell_prev = box;
 		box->cell_next = cell->boxes;
+		box->cell_code = cell_code;
 		cell->boxes = box;
-		box->cell = cell;
 		cell->num_boxes++;
 	}
 }
@@ -123,11 +237,8 @@ unsigned grid_query_rect(Document *document, Box **result,
 		for (int i = first_i; i <= last_i; ++i) {
 			for (int j = first_j; j <= last_j; ++j) {
 				unsigned cell_code = grid_cell_code(i * pitch, j * pitch, level);
-				GridHash::iterator iter = document->box_quadtree.find(cell_code);
-				if (iter == document->box_quadtree.end())
-					continue;
-				GridCell *cell = &iter->second;
-				if (cell->query_stamp == document->box_query_stamp)
+				GridCell *cell = grid_find_cell(&document->grid, cell_code);
+				if (cell == NULL || cell->query_stamp == document->box_query_stamp)
 					continue;
 				cell->query_stamp = document->box_query_stamp;
 				for (Box *box = cell->boxes; box != NULL; box = box->cell_next) {
@@ -296,11 +407,11 @@ void unit_test_box_grid(Document *document)
 				outer_rectangle(missing_box, &bx0, &bx1, &by0, &by1);
 				dmsg("\tBox \"%s\" bounds=(%.2f, %.2f, %.2f, %.2f)",
 					get_box_debug_string(missing_box), bx0, bx1, by0, by1);
-				const GridCell *cell = missing_box->cell;
-				if (cell != NULL) {
+				if (missing_box->cell_code != INVALID_CELL_CODE) {
+					const GridCell *cell = grid_find_cell(&document->grid, 
+						missing_box->cell_code);
 					dmsg(" in cell [code=%xh, stamp=%u]\n", 
-						missing_box->cell->code, 
-						missing_box->cell->query_stamp);
+						cell->code, cell->query_stamp);
 				} else {
 					dmsg(", which is not in the grid.\n");
 				}
@@ -314,8 +425,7 @@ void unit_test_box_grid(Document *document)
 
 void dump_grid(Document *document)
 {
-	GridHash *hash = &document->box_quadtree;
-	GridHash::const_iterator iter;
+	const Grid *grid = &document->grid;
 
 	struct LevelStatistics {
 		unsigned cell_count;
@@ -325,9 +435,11 @@ void dump_grid(Document *document)
 		float mean_diameter;
 	} stats[GRID_DEPTH];
 	memset(stats, 0, sizeof(stats));
-	unsigned num_cells = hash->size();
-	for (iter = hash->begin(); iter != hash->end(); ++iter) {
-		const GridCell *cell = &iter->second;
+	unsigned num_cells = grid->num_cells;
+	for (unsigned i = 0; i < grid->capacity; ++i) {
+		const GridCell *cell = grid->cells + i;
+		if ((cell->code & GRID_CODE_BIT) == 0)
+			continue;
 		unsigned level = grid_level_from_code(cell->code);
 		LevelStatistics *s = stats + level;
 		s->box_count += cell->num_boxes;
@@ -360,8 +472,10 @@ void dump_grid(Document *document)
 			stats[level].mean_diameter);
 	}
 	dmsg("\n");
-	for (iter = hash->begin(); iter != hash->end(); ++iter) {
-		const GridCell *cell = &iter->second;
+	for (unsigned i = 0; i < grid->capacity; ++i) {
+		const GridCell *cell = grid->cells + i;
+		if ((cell->code & GRID_CODE_BIT) == 0)
+			continue;
 		dmsg("Cell log_pitch=%u, level=%u, pos=(%d,%d) code=%0.8x, num_boxes=%u\n", 
 			grid_log_pitch_from_code(cell->code),
 			grid_level_from_code(cell->code), 
@@ -375,6 +489,5 @@ void dump_grid(Document *document)
 		}
 	}
 }
-
 
 } // namespace stkr

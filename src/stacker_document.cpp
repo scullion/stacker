@@ -671,6 +671,7 @@ Document *create_document(System *system, unsigned flags)
 	document->source = NULL;
 	document->source_length = 0;
 	document->source_capacity = 0;
+	grid_init(&document->grid);
 	
 	unsigned mq_capacity = (flags & DOCFLAG_EXTERNAL_MESSAGES) != 0 ? 
 		DEFAULT_MESSAGE_QUEUE_CAPACITY : 0;
@@ -684,6 +685,9 @@ void destroy_document(Document *document)
 {
 	clear_document(document);
 	deinit_message_queue(&document->message_queue);
+	grid_deinit(&document->grid);
+	if (document->url_handle != urlcache::INVALID_URL_HANDLE)
+		document->system->url_cache->destroy_handle(document->url_handle);
 	delete [] document->source;
 	delete document;
 }
@@ -857,10 +861,7 @@ unsigned document_fetch_notify_callback(UrlHandle handle,
 		} else if (fetch_state == URL_FETCH_FAILED) {
 			set_navigation_state(document, DOCNAV_FAILED);
 		}
-	} else if (type == URL_NOTIFY_EVICT) {
-		system->url_cache->destroy_handle(handle);
-		document->url_handle = urlcache::INVALID_URL_HANDLE;
-	}
+	} 
 	return 0;
 }
 

@@ -587,6 +587,9 @@ Box *create_box(Document *document, Node *owner)
 	box->token_end = uint32_t(-1);
 	box->depth_interval = 0;
 	box->depth = 0;
+	box->cell_code = INVALID_CELL_CODE;
+	box->cell_prev = NULL;
+	box->cell_next = NULL;
 
 	return box;
 }
@@ -772,7 +775,7 @@ inline bool set_box_position(Document *document, Box *box, float a, float b,
 		if (box->owner != NULL && box == box->owner->box)
 			box->owner->flags |= NFLAG_UPDATE_TEXT_LAYERS | 
 				NFLAG_UPDATE_BOX_LAYERS;
-	} else if (box->cell == NULL) {
+	} else if (box->cell_code == INVALID_CELL_CODE) {
 		/* The box hasn't moved, but it isn't in the grid (boxes are removed
 		 * from the grid when they are hidden or changed parents). Now we know
 		 * the box's bounds, reinsert it into the grid. */

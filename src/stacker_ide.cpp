@@ -1178,7 +1178,7 @@ bool gui_structure_change_test_handle_message(GuiState *state,
 {
 	lp;
 
-	static const unsigned APPEND_COUNT = 50000;
+	static const unsigned APPEND_COUNT = 5000;
 
 	Document *document = state->document;
 
@@ -1191,7 +1191,7 @@ bool gui_structure_change_test_handle_message(GuiState *state,
 		for (unsigned i = 0; i < APPEND_COUNT; ++i) {
 			
 			char text[512];
-			sprintf(text, "Message %u", sts->step);
+			sprintf(text, "Message %u. Here's some example text to give the mesage a few more boxes.", sts->step);
 
 			AttributeAssignment attributes[2];
 			attributes[0] =  make_assignment(TOKEN_CLASS, 
