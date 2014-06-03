@@ -97,14 +97,14 @@ inline bool amask_test(const uint32_t *mask, int name)
 {
 	unsigned index = name - TOKEN_ATTRIBUTE_FIRST;
 	assertb(index < NUM_ATTRIBUTE_TOKENS);
-	return (mask[index / 32u] >> (index % 32u)) & 1;
+	return (mask[index >> 5] >> (index & 0x1F)) & 1;
 }
 
 inline void amask_or(uint32_t *mask, int name, bool value = true)
 {
 	unsigned index = name - TOKEN_ATTRIBUTE_FIRST;
 	assertb(index < NUM_ATTRIBUTE_TOKENS);
-	mask[index / 32u] |= (unsigned(value) << (index % 32u));
+	mask[index >> 5] |= (unsigned(value) << (index & 0x1F));
 }
 
 inline bool amask_is_subset(const uint32_t *a, const uint32_t *b)
