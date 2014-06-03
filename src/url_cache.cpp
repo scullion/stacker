@@ -804,35 +804,6 @@ static void cache_clear(Cache *cache)
 	cache_unlock(cache);
 }
 
-static void cache_initialize(Cache *cache, unsigned memory_limit,
-	unsigned num_fetch_slots)
-{
-	InitializeCriticalSection(&cache->lock);
-	cache->num_fetch_slots = num_fetch_slots;
-	cache->memory_limit = memory_limit;
-	cache->fetch_local = &default_local_fetch_callback;
-	cache->fetch_local_data = NULL;
-	for (unsigned i = 0; i < NUM_PRIORITY_LEVELS; ++i) {
-		cache->fetch_head[i] = NULL;
-		cache->fetch_tail[i] = NULL;
-	}
-	cache_initialize_fetch_slots(cache);
-	for (unsigned i = 0; i < MAX_NOTIFY_SINKS; ++i) {
-		cache->sinks[i].callback = NULL;
-		cache->sinks[i].user_data = NULL;
-	}
-	cache->clock = clock();
-}
-
-static void cache_deinitialize(Cache *cache)
-{
-	cache_lock(cache);
-	cache_clear(cache);
-	cache_deinitialize_fetch_slots(cache);
-	cache_unlock(cache);
-	DeleteCriticalSection(&cache->lock);
-}
-
 /* Returns a key uniquely identifying a URL. */
 static UrlKey cache_make_key(const char *url, int length = -1)
 {
@@ -1592,6 +1563,8 @@ static int cache_add_notify_sink(Cache *cache, NotifyCallback callback,
 
 static void cache_remove_notify_sink(Cache *cache, int sink_id)
 {
+	if (sink_id == INVALID_NOTIFY_SINK_ID)
+		return;
 	cache_lock(cache);
 	assert(sink_id >= 0 && sink_id < MAX_NOTIFY_SINKS);
 	assert(cache->sinks[sink_id].callback != NULL);
@@ -1620,6 +1593,38 @@ static void cache_update(Cache *cache)
 	cache_populate_fetch_slots(cache);
 	cache_evict_lru(cache);
 	cache_unlock(cache);
+}
+
+static void cache_initialize(Cache *cache, unsigned memory_limit,
+	unsigned num_fetch_slots)
+{
+	InitializeCriticalSection(&cache->lock);
+	cache->num_fetch_slots = num_fetch_slots;
+	cache->memory_limit = memory_limit;
+	cache->fetch_local = &default_local_fetch_callback;
+	cache->fetch_local_data = NULL;
+	for (unsigned i = 0; i < NUM_PRIORITY_LEVELS; ++i) {
+		cache->fetch_head[i] = NULL;
+		cache->fetch_tail[i] = NULL;
+	}
+	cache_initialize_fetch_slots(cache);
+	for (unsigned i = 0; i < MAX_NOTIFY_SINKS; ++i) {
+		cache->sinks[i].callback = NULL;
+		cache->sinks[i].user_data = NULL;
+	}
+	cache->num_notify_sinks = 0;
+	cache->clock = clock();
+}
+
+static void cache_deinitialize(Cache *cache)
+{
+	cache_lock(cache);
+	for (unsigned i = 0; i < cache->num_notify_sinks; ++i)
+		cache_remove_notify_sink(cache, (int)i);
+	cache_clear(cache);
+	cache_deinitialize_fetch_slots(cache);
+	cache_unlock(cache);
+	DeleteCriticalSection(&cache->lock);
 }
 
 /*
