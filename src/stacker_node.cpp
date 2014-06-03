@@ -845,15 +845,14 @@ const Node *inline_next(const Document *document, const Node *root,
 		tree_next(document, root, node) : tree_next_up(document, root, node);
 }
 
+/* Returns the axis a node's main box should have. */
 static Axis structural_axis(NodeType type)
 {
-	switch (type) {
-		case LNODE_VBOX:
-		case LNODE_PARAGRAPH:
-			return AXIS_V;
-		default:
-			return AXIS_H;
-	}
+	if (type == LNODE_VBOX)
+		return AXIS_V;
+	if (natural_context(type) == LCTX_INLINE_CONTAINER)
+		return AXIS_V;
+	return AXIS_H;
 }
 
 NodeType node_type_for_tag(int tag_name)
