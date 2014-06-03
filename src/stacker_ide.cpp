@@ -1670,13 +1670,14 @@ static BOOL CALLBACK gui_dialog_proc(HWND hwnd, unsigned message, WPARAM wp, LPA
 		gui_update_viewer_layout(state);
 		return FALSE;
 	} else if (message == WM_MOUSEMOVE || message == WM_LBUTTONDOWN || 
-		message == WM_LBUTTONUP || message == WM_RBUTTONDOWN || 
+		message == WM_LBUTTONDBLCLK || message == WM_LBUTTONUP || 
+		message == WM_RBUTTONDOWN || message == WM_RBUTTONDBLCLK ||
 		message == WM_RBUTTONUP) {
 
 		/* Update the splitter state. */
 		POINT pos = { short(LOWORD(lp)), short(HIWORD(lp)) };
 		if (!state->doc_mouse_capture) {
-			if (message == WM_LBUTTONDOWN) {
+			if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK) {
 				if (PtInRect(&state->hsplitter_box, pos)) {
 					state->moving_hsplitter = true;
 					SetCursor(LoadCursor(NULL, IDC_SIZEWE));
@@ -1734,7 +1735,7 @@ static BOOL CALLBACK gui_dialog_proc(HWND hwnd, unsigned message, WPARAM wp, LPA
 					flags |= MMF_CTRL;
 				if ((GetKeyState(VK_MENU) & 0x8000) != 0)
 					flags |= MMF_ALT;
-				if (message == WM_LBUTTONDOWN)
+				if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK)
 					type = MSG_MOUSE_LEFT_DOWN;
 				else if (message == WM_LBUTTONUP)
 					type = MSG_MOUSE_LEFT_UP;
