@@ -1113,6 +1113,8 @@ unsigned make_node_debug_string(const Document *document,
 		NODE_TYPE_STRINGS[node->type], 
 		TOKEN_STRINGS[node->token],
 		suffix);
+	if (rt_length != 0)
+		delete [] suffix;
 	buffer[buffer_size - 1] = '\0';
 	if (length < 0)
 		length = int(buffer_size) - 1;
