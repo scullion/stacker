@@ -1301,7 +1301,7 @@ static void destroy_node_boxes(Document *document, Node *node)
 {
 	if (node->box == NULL)
 		return;
-	if (node->layout == LAYOUT_INLINE_CONTAINER) {
+	if (node->current_layout == LAYOUT_INLINE_CONTAINER) {
 		/* A text container owns its container box and the line boxes, which are
 		 * the container box's immediate children. Its text boxes are destroyed
 		 * with the inline context. */
