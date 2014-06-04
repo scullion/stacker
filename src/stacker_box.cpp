@@ -711,10 +711,11 @@ void configure_container_box(Document *document, Node *node, Axis axis, Box *box
 {
 	box->axis = axis;
 	
-	DimensionMode mode_width  = (DimensionMode)read_as_float(node, TOKEN_WIDTH, &box->ideal[AXIS_H], 0.0f);
-	DimensionMode mode_height = (DimensionMode)read_as_float(node, TOKEN_HEIGHT, &box->ideal[AXIS_V], 0.0f);
-	set_ideal_size(document, box, AXIS_H, mode_width, box->ideal[AXIS_H]);
-	set_ideal_size(document, box, AXIS_V, mode_height, box->ideal[AXIS_V]);
+	float ideal_width, ideal_height;
+	DimensionMode mode_width  = (DimensionMode)read_as_float(node, TOKEN_WIDTH, &ideal_width, 0.0f);
+	DimensionMode mode_height = (DimensionMode)read_as_float(node, TOKEN_HEIGHT, &ideal_height, 0.0f);
+	set_ideal_size(document, box, AXIS_H, mode_width, ideal_width);
+	set_ideal_size(document, box, AXIS_V, mode_height, ideal_height);
 
 	box->mode_min[AXIS_H]          = (unsigned char)read_as_float(node, TOKEN_MIN_WIDTH, &box->min[AXIS_H], 0.0f);
 	box->mode_min[AXIS_V]          = (unsigned char)read_as_float(node, TOKEN_MIN_HEIGHT, &box->min[AXIS_V], 0.0f);
