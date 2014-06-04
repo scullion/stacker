@@ -62,6 +62,13 @@ static unsigned grid_level(unsigned diameter)
 	return level;
 }
 
+inline unsigned hash_cell_code(unsigned cell_code)
+{
+	unsigned key = cell_code * 0xcc9e2d51;
+	key = (key << 15) | (key >> 17);
+	return key * 5 + 0xe6546b64;
+}
+
 static unsigned box_cell_code(const Box *box)
 {
 	float x0, x1, y0, y1;
@@ -89,13 +96,6 @@ void grid_deinit(Grid *grid)
 }
 
 static void grid_set_capacity(Grid *grid, unsigned new_capacity);
-
-inline unsigned hash_cell_code(unsigned cell_code)
-{
-	unsigned key = cell_code * 0xcc9e2d51;
-	key = (key << 15) | (key >> 17);
-	return key * 5 + 0xe6546b64;
-}
 
 static GridCell *grid_find_cell(Grid *grid, unsigned cell_code)
 {
@@ -129,20 +129,17 @@ static GridCell *grid_insert_cell(Grid *grid, unsigned cell_code,
 		grid_set_capacity(grid, grid_new_capacity(grid->capacity));
 	unsigned mask = grid->capacity - 1;
 	unsigned index = hash_cell_code(cell_code) & mask;
+	GridCell *cell = grid->cells + index;
 	GridCell *inserted_cell = NULL;
-	for (unsigned probe = 0; ; ++probe) {
-		GridCell *cell = grid->cells + index;
+	for (unsigned probe = 0; cell->code != cell_code; ++probe) {
 		if ((cell->code & GRID_CODE_BIT) == 0) {
-			grid->num_cells += (cell->code == GRID_CODE_EMPTY);
+			grid->num_cells++;
 			cell->code = cell_code;
 			cell->boxes = boxes;
 			cell->num_boxes = num_boxes;
 			cell->query_stamp = query_stamp;
-			if (inserted_cell == NULL)
-				inserted_cell = cell;
-			break;
-		} else if (cell->code == cell_code) {
-			inserted_cell = cell;
+			if (inserted_cell != NULL)
+				cell = inserted_cell;
 			break;
 		}
 		unsigned distance = (index - hash_cell_code(cell->code)) & mask;
@@ -156,12 +153,14 @@ static GridCell *grid_insert_cell(Grid *grid, unsigned cell_code,
 			probe = distance;
 		}
 		index = (index + 1) & mask;
+		cell = grid->cells + index;
 	}
-	return inserted_cell;
+	return cell;
 }
 
 static void grid_set_capacity(Grid *grid, unsigned new_capacity)
 {
+	assertb(new_capacity >= grid->num_cells);
 	unsigned old_capacity = grid->capacity;
 	GridCell *old_cells = grid->cells;
 	grid->cells = new GridCell[new_capacity];
@@ -183,7 +182,8 @@ void grid_remove(Document *document, Box *box)
 	if (box->cell_code == INVALID_CELL_CODE)
 		return;
 	GridCell *cell = grid_find_cell(&document->grid, box->cell_code);
-	assertb(cell != NULL && cell->num_boxes != 0);
+	assertb(cell != NULL && cell->num_boxes != 0 && 
+		cell->code == box->cell_code);
 	if (box->cell_prev != NULL) {
 		box->cell_prev->cell_next = box->cell_next;
 	} else {
@@ -203,6 +203,7 @@ void grid_insert(Document *document, Box *box)
 {
 	unsigned cell_code = box_cell_code(box); 
 	GridCell *cell = grid_insert_cell(&document->grid, cell_code);
+	assertb(cell != NULL && cell->code == cell_code);
 	if (cell_code != box->cell_code) {
 		grid_remove(document, box);
 		if (cell->boxes != NULL)
