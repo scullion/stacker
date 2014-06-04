@@ -4,6 +4,11 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup />
   <ItemDefinitionGroup>
+<<<<<<< Updated upstream
+=======
+    <ClCompile />
+    <ClCompile />
+>>>>>>> Stashed changes
     <ClCompile>
       <PreprocessorDefinitions>STACKER_DIAGNOSTICS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
