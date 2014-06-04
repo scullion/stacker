@@ -295,6 +295,24 @@ static void box_notify_child_added_or_removed(Document *document,
 	}
 }
 
+/* True if 'child' should be in the main grid. */
+static bool should_be_in_grid(const Document *document, const Box *child, 
+	const Box *parent)
+{
+	const Box *root = document->root->box;
+	return child == root || (parent != NULL && is_child(parent, root));
+}
+
+/* Recursively removes boxes from the grid. */
+static void remove_children_from_grid(Document *document, Box *box)
+{
+	grid_remove(document, box);
+	for (Box *child = box->first_child; child != NULL; 
+		child = child->next_sibling) {
+		remove_children_from_grid(document, child);
+	} 
+}
+
 /* Updates a child box's layout flags in response to the child's parent having
  * changed. Does not change parent flags. */
 static void box_notify_new_parent(Document *document, Box *child, Box *parent)
@@ -312,8 +330,8 @@ static void box_notify_new_parent(Document *document, Box *child, Box *parent)
 	clear_flag_in_parents(document, child, clear_in_parents);
 	/* Boxes not in the tree should not be in the grid because we don't want
 	 * them to be found in queries for mouse selection and view visibility. */
-	if (parent == NULL && child->owner != document->root) 
-		grid_remove(document, child);
+	if (!should_be_in_grid(document, child, parent)) 
+		remove_children_from_grid(document, child);
 }
 
 
@@ -345,7 +363,7 @@ static bool require_provisional_size(Document *document, Box *box, Axis axis)
 static bool is_inline_container_box(const Box *box)
 {
 	return box->owner != NULL && box == get_box(box->owner) && 
-		get_layout_context(box->owner) == LCTX_INLINE_CONTAINER;
+		get_layout(box->owner) == LAYOUT_INLINE_CONTAINER;
 }
 
 /* Can the size of a box be set from above? It can if the dimension is not 
@@ -687,9 +705,10 @@ void destroy_owner_chain(Document *document, Box *first,
 	}
 }
 
-Box *build_block_box(Document *document, Node *node, Axis axis)
+/* Synchronizes the properties of a block or inline container box with the 
+ * attributes of the node that owns it. */
+void configure_container_box(Document *document, Node *node, Axis axis, Box *box)
 {
-	Box *box = create_box(document, node);
 	box->axis = axis;
 	
 	DimensionMode mode_width  = (DimensionMode)read_as_float(node, TOKEN_WIDTH, &box->ideal[AXIS_H], 0.0f);
@@ -716,8 +735,17 @@ Box *build_block_box(Document *document, Node *node, Axis axis)
 
 	unsigned clip_edges = read_mode(node, TOKEN_CLIP, EDGE_FLAG_ALL);
 	box->flags |= edge_set_to_box_clip_flags(clip_edges);
-	
-	return box;
+
+	/* Inline container boxes expand to fit the width of their container
+	 * unless otherwise specified. */
+	if (node->layout == LAYOUT_INLINE_CONTAINER && 
+		box->mode_dim[AXIS_H] == ADEF_UNDEFINED) {
+		box->mode_dim[AXIS_H] = DMODE_FRACTIONAL;
+		box->ideal[AXIS_H] = 1.0f;
+	}
+
+	set_box_dimensions_from_image(document, node, box);
+	node->flags |= NFLAG_UPDATE_SELECTION_LAYERS | NFLAG_UPDATE_BOX_LAYERS;
 }
 
 Box *build_line_box(Document *document, Node *node, 

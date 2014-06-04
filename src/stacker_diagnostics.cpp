@@ -128,7 +128,7 @@ void dump_all_inline_contexts(const Document *document, const Node *root)
 {
 	for (const Node *child = root; child != NULL; 
 		child = tree_next(document, root, child)) {
-		if (get_layout_context(child) == LCTX_INLINE_CONTAINER)
+		if (get_layout(child) == LAYOUT_INLINE_CONTAINER)
 			dump_inline_context(document, child);
 	}
 }

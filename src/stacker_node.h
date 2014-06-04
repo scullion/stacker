@@ -45,6 +45,8 @@ struct Node {
 
 	uint8_t type;
 	uint8_t layout;
+	uint8_t current_layout;
+	uint8_t target_layout;
 	uint8_t token;
 	uint8_t num_matched_rules;
 	uint8_t num_rule_keys;
@@ -79,8 +81,8 @@ struct AttributeIterator {
 };
 
 NodeType node_type_for_tag(int tag_name);
-LayoutContext natural_context(NodeType type);
-LayoutContext token_natural_context(int token);
+Layout natural_layout(NodeType type);
+Layout token_natural_layout(int token);
 
 const Attribute *node_first_attribute(const Node *node, 
 	AttributeIterator *iterator);

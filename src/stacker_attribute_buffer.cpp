@@ -252,6 +252,35 @@ bool is_auto_mode(int name, int mode)
 	return false;
 }
 
+/* True if an attribute can be inherited from parent nodes. */
+bool is_inheritable(int name)
+{
+	switch (name) {
+		case TOKEN_LEADING:
+		case TOKEN_INDENT:
+		case TOKEN_ARRANGE:
+		case TOKEN_ALIGN:
+		case TOKEN_JUSTIFY:
+		case TOKEN_FONT:
+		case TOKEN_FONT_SIZE:
+		case TOKEN_COLOR:
+		case TOKEN_BORDER_COLOR:
+		case TOKEN_BACKGROUND_COLOR:
+		case TOKEN_SELECTION_COLOR:
+		case TOKEN_SELECTION_FILL_COLOR:
+		case TOKEN_TINT:
+		case TOKEN_BOLD:
+		case TOKEN_ITALIC:
+		case TOKEN_UNDERLINE:
+		case TOKEN_ENABLED:
+		case TOKEN_WHITE_SPACE:
+		case TOKEN_WRAP:
+		case TOKEN_CURSOR:
+			return true;
+	}
+	return false;
+}
+
 AttributeAssignment make_assignment(Token name, int value, 
 	ValueSemantic vs, AttributeOperator op)
 {
@@ -524,10 +553,10 @@ static int validate_integer(int name, ValueSemantic vs, int value,
 		case ASEM_LAYOUT:
 			if (vs == VSEM_TOKEN) {
 				if (value == TOKEN_NONE) {
-					mode = LCTX_NO_LAYOUT;
+					mode = LAYOUT_NONE;
 				} else {
-					mode = LCTX_BLOCK + (value - TOKEN_BLOCK);
-					if (mode < LCTX_BLOCK || mode >= LCTX_SENTINEL)
+					mode = LAYOUT_BLOCK + (value - TOKEN_BLOCK);
+					if (mode < LAYOUT_BLOCK || mode >= LAYOUT_SENTINEL)
 						mode = STKR_TYPE_MISMATCH;
 				}
 			}

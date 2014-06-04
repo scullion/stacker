@@ -34,6 +34,7 @@ extern const char * const STORAGE_STRINGS[NUM_ATTRIBUTE_TYPES];
 int token_to_attribute_operator(int name);
 AttributeSemantic attribute_semantic(int name);
 ValueSemantic value_semantic(int type_token);
+bool is_inheritable(int name);
 bool is_auto_mode(int name, int mode);
 
 int parse_string_list(const char *s, int length, char *buffer, 

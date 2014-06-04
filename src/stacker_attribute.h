@@ -185,12 +185,12 @@ enum BoundingBox {
 };
 
 /* The algorithm used to position a node's children. */
-enum LayoutContext {
-	LCTX_NO_LAYOUT = ADEF_DEFINED,
-	LCTX_BLOCK,
-	LCTX_INLINE,
-	LCTX_INLINE_CONTAINER,
-	LCTX_SENTINEL
+enum Layout {
+	LAYOUT_NONE = ADEF_DEFINED,
+	LAYOUT_BLOCK,
+	LAYOUT_INLINE,
+	LAYOUT_INLINE_CONTAINER,
+	LAYOUT_SENTINEL
 };
 
 /* Bits used to define sets of edges. */

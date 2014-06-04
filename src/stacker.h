@@ -160,7 +160,8 @@ const unsigned VFLAG_DEBUG_MASK =
 	VFLAG_DEBUG_MOUSE_HIT;
 
 enum SystemFlag {
-	SYSFLAG_TEXT_LAYER_PALETTES = 1 << 0 // Group text clusters for the same font into a single layer containing a style palette.
+	SYSFLAG_TEXT_LAYER_PALETTES       = 1 << 0, // Group text clusters for the same font into a single layer containing a style palette.
+	SYSFLAG_CACHE_HIDDEN_NODE_LAYOUTS = 1 << 1  // Spend memory to make showing and hiding nodes fast.
 };
 
 enum Code {
@@ -245,7 +246,7 @@ unsigned get_text_length(const Node *node);
 Box *get_box(Node *node);
 const Box *get_box(const Node *node);
 const char *get_text(const Node *node);
-LayoutContext get_layout_context(const Node *node);
+Layout get_layout(const Node *node);
 unsigned get_flags(const Node *node);
 void set_node_flags(Document *document, Node *node, unsigned mask, bool value);
 void set_node_flags_internal(Document *document, Node *node, 

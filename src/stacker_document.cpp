@@ -106,7 +106,7 @@ static CaretAddress resolve_selection_anchor(Document *document,
 	float ax0, ax1, ay0, ay1;
 	outer_rectangle(anchor, &ax0, &ax1, &ay0, &ay1);
 	
-	if (node->layout == LCTX_INLINE_CONTAINER) {
+	if (node->layout == LAYOUT_INLINE_CONTAINER) {
 		/* If 'y' is inside a vertical band surrounding the anchor box, find the
 		 * caret position in the anchor token closest to 'x'. If 'y' is outside 
 		 * the band, ignore 'x' and select from the beginning or end of the line
@@ -173,7 +173,7 @@ static void build_selection_chain(Document *document, CaretAddress start,
 			(void **)&document->selection_chain_head,
 			(void **)&document->selection_chain_tail,
 			node, NULL, offsetof(Node, selection_prev));
-		if (node->layout == LCTX_INLINE_CONTAINER) {
+		if (node->layout == LAYOUT_INLINE_CONTAINER) {
 			InlineContext *icb = node->inline_context;
 			icb->selection_start = closest_internal_address(document, node, walker.start, ARW_TIES_TO_END);
 			icb->selection_end = closest_internal_address(document, node, walker.end, ARW_TIES_TO_START);
@@ -219,7 +219,7 @@ static unsigned read_selection_chain_text(const Document *document, char *buffer
 	unsigned length = 0;
 	for (const Node *node = document->selection_chain_head; node != NULL; 
 		node = node->selection_next) {
-		if (node->layout != LCTX_INLINE_CONTAINER)
+		if (node->layout != LAYOUT_INLINE_CONTAINER)
 			continue;
 		const InlineContext *icb = node->inline_context;
 		if (length != 0) {
@@ -448,7 +448,7 @@ static void update_hit_node(Document *document, const Message *message)
 	if (use_default_cursor) {
 		CursorType ct = (document->hit_node != NULL && 
 			(document->flags & DOCFLAG_ENABLE_SELECTION) != 0 &&
-			document->hit_node->layout == LCTX_INLINE) ? 
+			document->hit_node->layout == LAYOUT_INLINE) ? 
 			CT_CARET : CT_DEFAULT;
 		set_cursor(document, ct);
 	}

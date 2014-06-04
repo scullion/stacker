@@ -4,9 +4,8 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup />
   <ItemDefinitionGroup>
-    <ClCompile>
-      <PreprocessorDefinitions>STACKER_DIAGNOSTICS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-    </ClCompile>
+    <ClCompile />
+    <ClCompile />
   </ItemDefinitionGroup>
   <ItemGroup />
 </Project>

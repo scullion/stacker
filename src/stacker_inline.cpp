@@ -64,7 +64,7 @@ const InlineToken *inline_token(const InlineContext *icb, unsigned index)
  * given the current state of the node. */
 InternalAddress expand_internal_address(const Node *node, InternalAddress ia)
 {
-	if (node->layout == LCTX_INLINE_CONTAINER) {
+	if (node->layout == LAYOUT_INLINE_CONTAINER) {
 		const InlineContext *icb = node->inline_context;
 		ia.token = inline_token_index(icb, ia.token);
 		if (ia.offset == IA_END && ia.token != IA_END)
@@ -124,7 +124,7 @@ static unsigned address_to_icb_offset(const InlineContext *icb,
 static InternalAddress closer_end(const Node *node, InternalAddress ia, 
 	AddressRewriteMode mode)
 {
-	if (node->layout == LCTX_INLINE_CONTAINER) {
+	if (node->layout == LAYOUT_INLINE_CONTAINER) {
 		const InlineContext *icb = node->inline_context;
 		bool after;
 		if (mode == ARW_TIES_TO_CLOSER) {
@@ -210,7 +210,7 @@ const Node *inline_node_at(const InlineContext *icb, InternalAddress ia)
 const Node *node_at_caret(CaretAddress address)
 {
 	const Node *node = address.node;
-	if (node != NULL && node->layout == LCTX_INLINE_CONTAINER)
+	if (node != NULL && node->layout == LAYOUT_INLINE_CONTAINER)
 		node = inline_node_at(node->inline_context, address.ia);
 	return node;
 }
@@ -220,7 +220,7 @@ bool is_fully_selected(const Document *document, const Node *node)
 {
 	if ((node->flags & NFLAG_IN_SELECTION_CHAIN) == 0)
 		return false;
-	if (node->layout != LCTX_INLINE_CONTAINER)
+	if (node->layout != LAYOUT_INLINE_CONTAINER)
 		return node->first_child == NULL || 
 			is_fully_selected(document, node->first_child) && 
 			is_fully_selected(document, node->last_child);
@@ -293,7 +293,7 @@ CaretAddress caret_position(Document *document, const Box *box, float x)
 	/* If the box represents a block node, position the caret at offset zero or
 	 * one according to whether the query offset is left or right of centre. */
 	float dx = x - box->pos[AXIS_H];
-	if (address.node->layout == LCTX_BLOCK) {
+	if (address.node->layout == LAYOUT_BLOCK) {
 		float mid = 0.5f * outer_dim(box, AXIS_H);
 		address.ia.offset = dx < mid ? 0 : IA_END;
 		return address;
@@ -371,7 +371,7 @@ bool caret_equal(CaretAddress a, CaretAddress b)
 static bool selection_interval(const Document *document, const Node *node,
 	unsigned token_start, unsigned token_end, float *sel_x0, float *sel_x1)
 {
-	assertb(node->layout == LCTX_INLINE_CONTAINER);
+	assertb(node->layout == LAYOUT_INLINE_CONTAINER);
 	const InlineContext *icb = node->inline_context;
 
 	/* Does the token intersect with the ICB's selection? Note that j is the
@@ -495,7 +495,7 @@ static int itok_next_char(InlineTokenizer *tt)
 			tt->pos.next_char = 0;
 			tt->pos.child_offset = 0;
 			return 0;
-		} else if (tt->pos.child->layout != LCTX_INLINE) {
+		} else if (tt->pos.child->layout != LAYOUT_INLINE) {
 			tt->pos.next_char = ITOK_CHILD;
 			tt->pos.child_offset = 0;
 			return ITOK_CHILD;
@@ -1447,7 +1447,7 @@ VisualLayer *build_text_layer_stack(Document *document, Node *node)
 unsigned read_inline_text(const Document *document, const Node *node,
 	InternalAddress start, InternalAddress end, char *buffer)
 {
-	assertb(node->layout == LCTX_INLINE_CONTAINER);
+	assertb(node->layout == LAYOUT_INLINE_CONTAINER);
 	assertb(node->inline_context != NULL);
 
 	document;

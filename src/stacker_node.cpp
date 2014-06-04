@@ -63,9 +63,9 @@ const char *get_text(const Node *node)
 	return node->text;
 }
 
-LayoutContext get_layout_context(const Node *node)
+Layout get_layout(const Node *node)
 {
-	return (LayoutContext)node->layout;
+	return (Layout)node->layout;
 }
 
 unsigned get_flags(const Node *node)
@@ -471,9 +471,11 @@ static void afs_add_modifiers(AttributeFoldingState *fs)
 				amask_or(fs->required, b->name, node == fs->base);
 				if (!amask_test(fs->required, b->name))
 					continue;
-
 				/* Ignore the attribute if it was completed in a child node. */
 				if (amask_test(have_lhs, b->name))
+					continue;
+				/* Ignore parent values for non-inheritable attributes. */
+				if (node != fs->base && !is_inheritable(b->name))
 					continue;
 
 				/* If this is is a SET, the attribute's folding chain is 
@@ -589,8 +591,8 @@ static Attribute *afs_build_auto_value(AttributeFoldingState *fs,
 	return NULL;
 }
 
-static bool update_layout_context(Document *document, Node *node, 
-	LayoutContext context);
+static bool maybe_switch_layout(Document *document, Node *node, 
+	Layout context);
 
 /* Computes the final value for each visited attribute, storing the results as
  * folded attributes at the start of 'dest'. */
@@ -599,7 +601,7 @@ static void afs_reduce(AttributeFoldingState *fs)
 	Node *base = fs->base;
 	Document *document = base->document;
 	AttributeBuffer *dest = &base->attributes;
-	LayoutContext new_layout = natural_context((NodeType)base->type);
+	Layout new_layout = natural_layout((NodeType)base->type);
 
 	/* If this is the root, it defines the global text selection colours. */
 	if (base == document->root) {
@@ -633,13 +635,13 @@ static void afs_reduce(AttributeFoldingState *fs)
 			}
 			lhs->folded = true;
 		}
-		
+				
 		/* Read the attribute and update the style. */
 		int32_t integer_value;
 		int mode;
 		switch (lhs->name) {
 			case TOKEN_LAYOUT:
-				new_layout = (LayoutContext)abuf_read_mode(lhs, new_layout);
+				new_layout = (Layout)abuf_read_mode(lhs, new_layout);
 				break;
 			case TOKEN_FONT:
 				abuf_read_string(lhs, fs->descriptor.face, 
@@ -741,9 +743,9 @@ static void afs_reduce(AttributeFoldingState *fs)
 	 * attribute is changed by a rule that also applies some other style 
 	 * attributes. If the rule is enabled and disabled to hide and show the
 	 * node, the other styles will change and change back again to no effect. */
-	if (update_layout_context(document, base, new_layout))
+	if (maybe_switch_layout(document, base, new_layout))
 		base->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
-	if (base->layout == LCTX_NO_LAYOUT)
+	if (base->layout == LAYOUT_NONE)
 		fs->style = fs->base->style;
 }
 
@@ -846,7 +848,7 @@ const Node *tree_next(const Document *document, const Node *root,
 const Node *inline_next(const Document *document, const Node *root,
 	const Node *node)
 {
-	return (node != NULL && (node->layout == LCTX_INLINE || node == root)) ? 
+	return (node != NULL && (node->layout == LAYOUT_INLINE || node == root)) ? 
 		tree_next(document, root, node) : tree_next_up(document, root, node);
 }
 
@@ -855,7 +857,7 @@ static Axis structural_axis(NodeType type)
 {
 	if (type == LNODE_VBOX)
 		return AXIS_V;
-	if (natural_context(type) == LCTX_INLINE_CONTAINER)
+	if (natural_layout(type) == LAYOUT_INLINE_CONTAINER)
 		return AXIS_V;
 	return AXIS_H;
 }
@@ -889,45 +891,52 @@ NodeType node_type_for_tag(int tag_name)
 }
 
 /* Returns the layout context established for the children of a particular kind 
- * of node. The result may be LCTX_NONE, which means that it depends on the
- * parent context. */
-LayoutContext natural_context(NodeType type)
+ * of node. The result may be LAYOUT_NONE, which means that it depends on the
+ * parent layout. */
+Layout natural_layout(NodeType type)
 {
 	if (type == LNODE_TEXT || type == LNODE_PARAGRAPH || type == LNODE_HEADING)
-		return LCTX_INLINE_CONTAINER;
+		return LAYOUT_INLINE_CONTAINER;
 	if (type == LNODE_VBOX || type == LNODE_HBOX || type == LNODE_IMAGE)
-		return LCTX_BLOCK;
-	return LCTX_INLINE;
+		return LAYOUT_BLOCK;
+	return LAYOUT_INLINE;
 }
 
 /* Returns the layout context determined by the node type associated with a tag. */
-LayoutContext token_natural_context(int token)
+Layout token_natural_layout(int token)
 {
 	NodeType type = node_type_for_tag(token);
-	return type != LNODE_INVALID ? natural_context(type) : LCTX_NO_LAYOUT;
+	return type != LNODE_INVALID ? natural_layout(type) : LAYOUT_NONE;
 }
 
-/* Returns the layout context that a node establishes. */
-static LayoutContext established_context(const Document *document, 
-	const Node *node, LayoutContext context)
+/* Returns the layout a node should estabished based on its requested layout
+ * and the layout of its current parents. */
+static Layout established_layout(const Document *document, 
+	const Node *node, Layout requested)
 {
 	document;
 
-	/* Does the node determine its own context? */
-	if (context == LCTX_BLOCK)
-		return LCTX_BLOCK;
+	/* Does the node determine its own layout? */
+	if (requested == LAYOUT_NONE || requested == LAYOUT_BLOCK)
+		return requested;
 	/* Find the first block or inline node in the parent chain. */
 	for (node = node->parent; node != NULL; node = node->parent) {
-		LayoutContext parent_context = (LayoutContext)node->layout;
-		/* Transparent nodes within blocks establish a block. */
-		if (parent_context == LCTX_BLOCK)
-			return (context == LCTX_INLINE) ? LCTX_BLOCK : context;
-		/* A transparent child of an inline node establishes no context. An 
-		 * inline container inside in inline container becomes transparent. */
-		if (parent_context == LCTX_INLINE_CONTAINER)
-			return LCTX_INLINE;
+		Layout parent_layout = (Layout)node->layout;
+		switch (parent_layout) {
+			case LAYOUT_NONE:
+				return LAYOUT_NONE;
+			case LAYOUT_BLOCK:
+				/* Transparent nodes within blocks establish a block. */
+				return (requested == LAYOUT_INLINE) ? LAYOUT_BLOCK : requested;
+			case LAYOUT_INLINE_CONTAINER:
+				/* Non-blocks within inline containers are inline. */
+				 return LAYOUT_INLINE;
+			default:
+				/* Walk up through inline parents. */
+				break;
+		}	
 	}
-	return LCTX_INLINE_CONTAINER;
+	return LAYOUT_INLINE_CONTAINER;
 }
 
 void remove_from_parent(Document *document, Node *child)
@@ -1194,7 +1203,9 @@ int create_node(Node **result, Document *document, NodeType type, int tag_name,
 	block += sizeof(Node);
 	node->document = document;
 	node->type = (uint8_t)type;
-	node->layout = (uint8_t)LCTX_NO_LAYOUT;
+	node->layout = (uint8_t)LAYOUT_NONE;
+	node->current_layout = (uint8_t)LAYOUT_NONE;
+	node->target_layout = (uint8_t)LAYOUT_NONE;
 	node->token = (uint8_t)tag_name;
 	node->flags = 
 		NFLAG_PARENT_CHANGED | 
@@ -1290,7 +1301,7 @@ static void destroy_node_boxes(Document *document, Node *node)
 {
 	if (node->box == NULL)
 		return;
-	if (node->layout == LCTX_INLINE_CONTAINER) {
+	if (node->layout == LAYOUT_INLINE_CONTAINER) {
 		/* A text container owns its container box and the line boxes, which are
 		 * the container box's immediate children. Its text boxes are destroyed
 		 * with the inline context. */
@@ -1606,7 +1617,7 @@ static void update_background_layers(Document *document, Node *node)
 /* Updates a node's selection highlight layers. */
 static void update_selection_layers(Document *document, Node *node)
 {
-	if (node->layout == LCTX_INLINE_CONTAINER) {
+	if (node->layout == LAYOUT_INLINE_CONTAINER) {
 		update_inline_selection_layers(document, node);
 		node->flags &= ~NFLAG_UPDATE_SELECTION_LAYERS;
 		node->flags |= NFLAG_UPDATE_BOX_LAYERS;
@@ -1621,18 +1632,41 @@ bool is_enabled(const Node *node)
 
 /* Checks for a change in a node's layout attribute and, if required, switches
  * the node's layout to the one requested. */
-static bool update_layout_context(Document *document, Node *node, 
-	LayoutContext context)
+static bool maybe_switch_layout(Document *document, Node *node, 
+	Layout requested)
 {
-	LayoutContext new_layout = established_context(document, node, context);
-	if (new_layout == (LayoutContext)node->layout)
-		return false;
-	destroy_node_boxes(document, node);
-	node->flags |= NFLAG_REBUILD_BOXES;
-	if (new_layout == LCTX_INLINE_CONTAINER && node->inline_context == NULL)
-		node->flags |= NFLAG_REBUILD_INLINE_CONTEXT;
-	node->layout = (uint8_t)new_layout;
-	return true;
+	/* Determine the layout established by the node given its current tree 
+	 * position. */
+	Layout new_layout = established_layout(document, node, requested);
+
+	/* Has the actual layout changed? */
+	bool layout_changed = false;
+	if (new_layout != (Layout)node->layout) {
+		node->layout = (uint8_t)new_layout;
+		layout_changed = true;
+	}
+	
+	/* If the node is being hidden, maybe cache the computed layout. */
+	Layout target = new_layout;
+	if (new_layout == LAYOUT_NONE && node->current_layout != LAYOUT_NONE && 
+		(document->system->flags & SYSFLAG_CACHE_HIDDEN_NODE_LAYOUTS) != 0)
+		target = (Layout)node->current_layout;
+
+	/* Boxes are rebuilt when the target layout changes. */
+	bool target_changed = (target != (Layout)node->target_layout);
+	if (target_changed) {
+		node->target_layout = (uint8_t)target;
+		node->flags |= NFLAG_REBUILD_BOXES;
+	} else {
+		/* We're not changing target layout (meaning we're not rebuilding 
+		 * boxes), but if the node's actual layout changed, we still need to
+		 * tell the parent to recompose its child boxes, because this box may
+		 * need to be excluded if it has been hidden or included if it has been
+		 * shown. */
+		if (layout_changed && node->parent != NULL) 
+			node->parent->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
+	}
+	return target_changed;
 }
 
 /* Returns the first node in a parent chain, including 'node' itself, that
@@ -1642,17 +1676,16 @@ const Node *find_context_node(const Document *document, const Node *node)
 	document;
 
 	/* An inline container node is always its own context. */
-	if (node == NULL || node->layout == LCTX_INLINE_CONTAINER)
+	if (node == NULL || node->layout == LAYOUT_INLINE_CONTAINER)
 		return node;
 
 	/* Find the first non-LCTX_NONE node in the parent chain. */
 	const Node *context;
 	for (context = node->parent; context != NULL; context = context->parent) {
-		if (context->layout != LCTX_INLINE) {
+		if (context->layout != LAYOUT_INLINE) {
 			/* A block inside an inline uses the inline as its context, whereas
 			 * a block inside a block defines its own context. */
-			if (context->layout == LCTX_BLOCK && 
-				node->layout == LCTX_BLOCK)
+			if (context->layout == LAYOUT_BLOCK && node->layout == LAYOUT_BLOCK)
 				return node;
 			break;
 		}
@@ -1666,7 +1699,7 @@ const Node *find_inline_container(const Document *document, const Node *node)
 {
 	const Node *context = find_context_node(document, node);
 	return (context != NULL && context != node && 
-		context->layout == LCTX_INLINE_CONTAINER) ? context : NULL;
+		context->layout == LAYOUT_INLINE_CONTAINER) ? context : NULL;
 }
 
 /* Finds the first inline container in the parent chain of a node. Whereas
@@ -1678,7 +1711,7 @@ const Node *find_chain_inline_container(const Document *document,
 {
 	document;
 	const Node *container = node->parent;
-	while (container != NULL && container->layout != LCTX_INLINE_CONTAINER)
+	while (container != NULL && container->layout != LAYOUT_INLINE_CONTAINER)
 		container = container->parent;
 	return container;
 }
@@ -1687,7 +1720,7 @@ const Node *find_chain_inline_container(const Document *document,
  * text of their children.*/
 static void update_text_layer(Document *document, Node *node)
 {
-	if (node->layout != LCTX_INLINE_CONTAINER)
+	if (node->layout != LAYOUT_INLINE_CONTAINER)
 		return;
 	VisualLayer *text_stack = build_text_layer_stack(document, node);
 	VisualLayer *old_stack = layer_chain_replace(VLCHAIN_NODE, &node->layers,
@@ -1725,37 +1758,45 @@ void set_interaction_state(Document *document, Node *node,
 	document->change_clock++;
 }
 
-/* Creates or updates a node's boxes. */
-static void rebuild_node_boxes(Document *document, Node *node)
+/* Creates or updates a node's boxes, making the node's computed layout the
+ * same as its layout. Assumes all attributes affecting box layout have changed,
+ * so that boxes must be recreated or reconfigured. */
+static void update_node_boxes(Document *document, Node *node)
 {
-	destroy_node_boxes(document, node);
-
-	/* Nodes that establish a block or inline context for their children
-	 * need a box. */
-	Box *box = NULL;
-	if (node->layout != LCTX_NO_LAYOUT && node->layout != LCTX_INLINE) {
-		Axis axis = structural_axis((NodeType)node->type);
-		box = build_block_box(document, node, axis);
-		set_box_debug_string(box, "%s block \"%s\"", 
-			NODE_TYPE_STRINGS[(NodeType)node->type],
-			random_word((uintptr_t)node));
-	}
-
-	/* Set the box's properties. */
-	if (box != NULL) {
-		/* Inline container boxes expand to fit the width of their container
-		 * unless otherwise specified. */
-		if (node->layout == LCTX_INLINE_CONTAINER && 
-			box->mode_dim[AXIS_H] == ADEF_UNDEFINED) {
-			box->mode_dim[AXIS_H] = DMODE_FRACTIONAL;
-			box->ideal[AXIS_H] = 1.0f;
+	/* If the current set of boxes is for a different layout mode, remake 
+	 * them.*/
+	Layout target = (Layout)node->target_layout;
+	bool needs_container = target == LAYOUT_BLOCK || 
+		target == LAYOUT_INLINE_CONTAINER;
+	Box *container = NULL;
+	if (node->current_layout != target) {
+		destroy_node_boxes(document, node);
+		/* Nodes that establish a block or inline context for their children
+		 * need a container box. */
+		if (needs_container) {
+			container = create_box(document, node);
+			set_box_debug_string(container, "%s block \"%s\"", 
+				NODE_TYPE_STRINGS[(NodeType)node->type],
+				random_word((uintptr_t)node));
 		}
-		set_box_dimensions_from_image(document, node, box);
-		node->flags |= NFLAG_UPDATE_SELECTION_LAYERS | NFLAG_UPDATE_BOX_LAYERS;
+		node->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
+		if (node->parent != NULL)
+			node->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
+	} else {
+		container = node->box;
 	}
-	node->box = box;
+	/* Update the box's properties, assuming all corresponding node attributes
+	 * have changed. */
+	if (needs_container) {
+		Axis axis = structural_axis((NodeType)node->type);
+		configure_container_box(document, node, axis, container);
+		node->box = container;
+	}
+	/* Make sure the node has an inline context if it needs one. */
+	if (target == LAYOUT_INLINE_CONTAINER && node->inline_context == NULL)
+		node->flags |= NFLAG_REBUILD_INLINE_CONTEXT;
+	node->current_layout = (uint8_t)target;
 	node->flags &= ~NFLAG_REBUILD_BOXES;
-	node->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
 }
 
 /* Attaches the boxes of child nodes to the box tree of this node. */
@@ -1766,14 +1807,14 @@ static void compose_child_boxes(Document *document, Node *node)
 		return;
 
 	/* Text blocks handle their children differently. */
-	if (node->layout != LCTX_BLOCK)
+	if (node->layout != LAYOUT_BLOCK)
 		return;
 
 	/* Add the boxes of all child nodes as children of our box. */
 	remove_all_children(document, box);
 	for (Node *child = node->first_child; child != NULL; 
 		child = child->next_sibling) {
-		if (child->layout == LCTX_NO_LAYOUT)
+		if (child->layout == LAYOUT_NONE)
 			continue;
 		Box *child_box = child->box;
 		if (child_box != NULL)
@@ -1838,7 +1879,7 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 	/* Rebuild this node's box. */
 	if ((node->flags & NFLAG_REBUILD_BOXES) != 0) {
 		lmsg("\t[%s] Rebuilding boxes.\n", NODE_TYPE_STRINGS[node->type]);
-		rebuild_node_boxes(document, node);
+		update_node_boxes(document, node);
 		propagate_up |= NFLAG_RECOMPOSE_CHILD_BOXES | NFLAG_UPDATE_TEXT_LAYERS;
 	}
 
@@ -1851,7 +1892,7 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 	}
 
 	/* Update inline contexts. */
-	if (node->layout == LCTX_INLINE_CONTAINER) {
+	if (node->layout == LAYOUT_INLINE_CONTAINER) {
 		if ((node->flags & NFLAG_REBUILD_INLINE_CONTEXT) != 0)
 			rebuild_inline_context(document, node);
 		if ((node->flags & NFLAG_REMEASURE_INLINE_TOKENS) != 0)
@@ -1879,7 +1920,7 @@ unsigned update_nodes_post_layout(Document *document, Node *node,
 		update_text_layer(document, node);
 		node->flags &= ~NFLAG_UPDATE_TEXT_LAYERS;
 		flags |= NFLAG_UPDATE_BOX_LAYERS;
-		if (node->layout == LCTX_INLINE)
+		if (node->layout == LAYOUT_INLINE)
 			propagate_up |= NFLAG_UPDATE_TEXT_LAYERS;
 	}
 	if ((flags & NFLAG_UPDATE_SELECTION_LAYERS) != 0) {
@@ -1889,7 +1930,7 @@ unsigned update_nodes_post_layout(Document *document, Node *node,
 	if ((flags & NFLAG_UPDATE_BOX_LAYERS) != 0) {
 		update_node_box_layers(document, node);
 		node->flags &= ~NFLAG_UPDATE_BOX_LAYERS;
-		if (node->layout == LCTX_INLINE)
+		if (node->layout == LAYOUT_INLINE)
 			propagate_up |= NFLAG_UPDATE_BOX_LAYERS;
 	}
 	if ((flags & (NFLAG_WIDTH_CHANGED | NFLAG_HEIGHT_CHANGED)) != 0) {
@@ -1913,7 +1954,7 @@ void do_text_layout(Document *document, Node *node)
 	for (Node *child = node->first_child; child != NULL; 
 		child = child->next_sibling)
 		do_text_layout(document, child);
-	if (node->layout != LCTX_INLINE_CONTAINER)
+	if (node->layout != LAYOUT_INLINE_CONTAINER)
 		return;
 
 	/* Determine the paragraph width. We use width -1, meaning "no breaking"

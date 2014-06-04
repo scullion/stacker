@@ -153,7 +153,7 @@ Box *create_box(Document *document, Node *owner);
 void destroy_box(Document *document, Box *box, bool destroy_children);
 void destroy_sibling_chain(Document *document, Box *first, bool destroy_children);
 void destroy_owner_chain(Document *document, Box *first, bool destroy_children);
-Box *build_block_box(Document *document, Node *node, Axis axis);
+void configure_container_box(Document *document, Node *node, Axis axis, Box *box);
 Box *build_line_box(Document *document, Node *node, 
 	Justification justification);
 Box *build_text_box(Document *document, Node *owner, 

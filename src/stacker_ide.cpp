@@ -1178,7 +1178,7 @@ bool gui_structure_change_test_handle_message(GuiState *state,
 {
 	lp;
 
-	static const unsigned APPEND_COUNT = 500;
+	static const unsigned APPEND_COUNT = 5000;
 
 	Document *document = state->document;
 
@@ -1189,32 +1189,19 @@ bool gui_structure_change_test_handle_message(GuiState *state,
 			"Structure change test: inserting nodes %s.\n",
 			(above ? "above" : "below"));
 		for (unsigned i = 0; i < APPEND_COUNT; ++i) {
-			
-			char text[512];
-			sprintf(text, "Message %u. Here's some example text to give the mesage a few more boxes.", sts->step);
-
-			AttributeAssignment attributes[2];
-			attributes[0] =  make_assignment(TOKEN_CLASS, 
-				((sts->step % 2) == 0) ? "even" : "odd",
-				VSEM_LIST);
-			attributes[1] = make_assignment(TOKEN_LAYOUT, TOKEN_NONE, 
-				VSEM_TOKEN);
-
+			char markup[512];
+			sprintf(markup, "<p>Message %u. Here's some example text to give the mesage a few more boxes.</p>", sts->step);
 			Node *container = NULL;
-			int rc = create_node(
-				&container, document, 
-				LNODE_PARAGRAPH, 
-				TOKEN_PARAGRAPH, 
-				attributes, 
-				2, 
-				text, strlen(text));
+			int rc = create_node_from_markup(&container, document, markup, strlen(markup));
 			if (rc == STKR_OK) {
+				const char *cls = ((sts->step % 2) == 0) ? "even" : "odd";
+				fold_string_attribute(document, container, TOKEN_CLASS, VSEM_LIST, cls, -1, AOP_ADD);
+				set_integer_attribute(document, container, TOKEN_LAYOUT, VSEM_TOKEN, TOKEN_NONE);
 				if (above)
 					prepend_child(document, get_root(document), container);
 				else
 					append_child(document, get_root(document), container);
 			}
-
 			sts->step++;
 		}
 
@@ -1841,7 +1828,8 @@ static void gui_init(GuiState *state)
 	state->url_cache->set_local_fetch_callback(&local_fetch_callback);
 
 	state->back_end = d2d_init(state->url_cache);
-	state->system = create_system(SYSFLAG_TEXT_LAYER_PALETTES, 
+	state->system = create_system(SYSFLAG_TEXT_LAYER_PALETTES | 
+		SYSFLAG_CACHE_HIDDEN_NODE_LAYOUTS, 
 		state->back_end, state->url_cache);
 	state->document = create_document(state->system, 
 		DOCFLAG_ENABLE_SELECTION | 

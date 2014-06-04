@@ -580,9 +580,9 @@ static int parse_text(Parser *parser, bool in_block = true)
 				continue;
 			if (rc != STKR_OK)
 				return rc;
-			LayoutContext context = token_natural_context(parser->token);
-			if (in_block && context != LCTX_NO_LAYOUT) {
-				if (context != LCTX_INLINE)
+			Layout layout = token_natural_layout(parser->token);
+			if (in_block && layout != LAYOUT_NONE) {
+				if (layout != LAYOUT_INLINE)
 					close_paragraph = true; /* Block is sibling to <p>. */
 				else
 					open_paragraph =  true; /* Non-block goes inside <p>. */
@@ -796,7 +796,7 @@ static int parse_tag(Parser *parser)
 		return (rc == STKR_OK_NO_SCOPE) ? STKR_OK : pop_scope(parser);
 
 	/* Parse the contents. */
-	rc = parse_text(parser, token_natural_context(tag_name) == LCTX_BLOCK);
+	rc = parse_text(parser, token_natural_layout(tag_name) == LAYOUT_BLOCK);
 	if (rc != STKR_OK)
 		return rc;
 
@@ -808,7 +808,7 @@ static int parse_tag(Parser *parser)
 int parse_document(Parser *parser)
 {
 	bool in_block = parser->scope == NULL || 
-		natural_context((NodeType)parser->scope->type) == LCTX_BLOCK;
+		natural_layout((NodeType)parser->scope->type) == LAYOUT_BLOCK;
 	int rc = parse_text(parser, in_block);
 	if (rc != STKR_OK)
 		return rc;
