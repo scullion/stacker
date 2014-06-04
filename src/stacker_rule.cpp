@@ -494,7 +494,10 @@ unsigned make_node_rule_keys(const System *system, int node_token,
 int node_matches_selector(const Document *document, const Node *node, 
 	const ParsedSelector *ps)
 {
-	document;
+	/* Rule keys must be up to date. */
+	if (must_update_rule_keys(node))
+		update_matched_rules((Document *)document, (Node *)node);
+
 	/* For each clause, walk up the parent chain from 'node'. The clause matches
 	 * if its key at each level is found in the rule key buffer of the 
 	 * corresponding node. */

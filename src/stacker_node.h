@@ -114,6 +114,9 @@ const Node *lowest_common_ancestor(const Node *a, const Node *b,
 	const Node **below_a = 0, const Node **below_b = 0);
 bool node_before(const Node *a, const Node *b);
 
+void update_matched_rules(Document *document, Node *node);
+bool must_update_rule_keys(const Node *node);
+
 unsigned update_nodes_pre_layout(Document *document, Node *node, 
 	unsigned propagate_down = 0, bool rule_tables_changed = false);
 unsigned update_nodes_post_layout(Document *document, Node *node, 

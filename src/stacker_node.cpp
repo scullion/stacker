@@ -1031,6 +1031,18 @@ bool is_child(const Node *child, const Node *parent)
 	return find_immediate_child(child, parent) != NULL;
 }
 
+
+/* True if a flag is set on 'node' or any of its parents. */
+bool is_flag_set_in_parent(const Node *node, unsigned mask)
+{
+	while (node != NULL) {
+		if ((node->flags & mask) != 0)
+			return true;
+		node = node->parent;
+	}
+	return false;
+}
+
 /* True if A is before B in the tree. */
 bool node_before(const Node *a, const Node *b)
 {
@@ -1346,6 +1358,15 @@ static void remove_node_layer(Document *document, Node *node, VisualLayer *layer
 	}
 }
 
+/* True if a node's rule keys are out of date. */
+bool must_update_rule_keys(const Node *node)
+{
+	unsigned mask = NFLAG_UPDATE_RULE_KEYS | NFLAG_UPDATE_MATCHED_RULES;
+	if ((node->flags & mask) != 0)
+		return true;
+	return is_flag_set_in_parent(node->parent, mask | NFLAG_UPDATE_CHILD_RULES);
+}
+
 /* Updates the list of rule table keys identifying selectors a node can 
  * match. */
 static void update_node_rule_keys(Document *document, Node *node, 
@@ -1427,7 +1448,7 @@ static void check_rule_slots(Document *document, Node *node)
  * change the set of mactched rules again, and so on ad infinitum. Cycles are
  * broken by stopping the process as soon as a previously matched rule with a
  * class modifier is removed from the match set. */
-static void update_matched_rules(Document *document, Node *node)
+void update_matched_rules(Document *document, Node *node)
 {
 	static const unsigned MAX_VISITED = 16;
 	
@@ -1469,6 +1490,10 @@ static void update_matched_rules(Document *document, Node *node)
 		if (quota != 0)
 			break;
 	} while ((node->flags & NFLAG_UPDATE_RULE_KEYS) != 0);
+
+	/* The children of this node may now match different rules, even if their
+	 * clasess haven't changed, because selectors can match parent nodes. */
+	node->flags |= NFLAG_UPDATE_CHILD_RULES;
 }
 
 /* Builds a LayerPosition structure by reading background attributes. */
@@ -1831,6 +1856,8 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 
 	update_node_debug_string(document, node);
 
+	/* Rematch rules and/or rebuild rule keys for this node if its classes or 
+	 * the contents of the rule tables have changed. */
 	if (rule_tables_changed)
 		node->flags |= NFLAG_UPDATE_MATCHED_RULES;
 	if ((node->flags & (NFLAG_UPDATE_RULE_KEYS | 
@@ -1839,6 +1866,12 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 		propagate_down |= NFLAG_UPDATE_MATCHED_RULES;
 	}
 	check_rule_slots(document, node);
+	
+	/* Recursively rematch child rules if required. */
+	if ((node->flags & NFLAG_UPDATE_CHILD_RULES) != 0) {
+		propagate_down |= NFLAG_UPDATE_MATCHED_RULES;
+		node->flags &= ~NFLAG_UPDATE_CHILD_RULES;
+	}
 
 	if ((node->flags & NFLAG_PARENT_CHANGED) != 0) {
 		handle_node_parent_changed(document, node);

@@ -56,38 +56,39 @@ enum NodeFlag {
 	NFLAG_REBUILD_INLINE_CONTEXT    = 1 << 6,  // The node's inline context buffer must be rebuilt from its children.
 	NFLAG_REMEASURE_INLINE_TOKENS   = 1 << 7,  // Tokens of an inline container may have changed size.
 	NFLAG_RECOMPOSE_CHILD_BOXES     = 1 << 8,  // Node child boxes have changed, and should be rearranged within the parent.
-	NFLAG_UPDATE_RULE_KEYS          = 1 << 9, // The set of keys used to match rules for this node must be recalculated.
+	NFLAG_UPDATE_RULE_KEYS          = 1 << 9,  // The set of keys used to match rules for this node must be recalculated.
 	NFLAG_UPDATE_MATCHED_RULES      = 1 << 10, // The node's match rule list must be recalculated.
+	NFLAG_UPDATE_CHILD_RULES        = 1 << 11, // Selectors that match parents may now match differently for children of this node.
 
 	/* Memory management flags. */		   
-	NFLAG_HAS_STATIC_TEXT           = 1 << 11, // The node's text buffer is allocated as part of the node block. 
-	NFLAG_HAS_STATIC_RULE_KEYS      = 1 << 12, // The node's rule key buffer is allocated as part of the node block.
+	NFLAG_HAS_STATIC_TEXT           = 1 << 12, // The node's text buffer is allocated as part of the node block. 
+	NFLAG_HAS_STATIC_RULE_KEYS      = 1 << 13, // The node's rule key buffer is allocated as part of the node block.
 												 
 	/* Hit testing bits. */				      
-	NFLAG_IN_HIT_CHAIN              = 1 << 13, // The node is a member of the most recently calculated hit set.
-	NFLAG_MOUSE_OVER                = 1 << 14, // One of the node's boxes is the top of the mouse hit stack.
-	NFLAG_MOUSE_OVER_CHILD          = 1 << 15, // A box of one of the node's children is the top of the mouse hit stack.
-	NFLAG_MOUSE_INSIDE              = 1 << 16, // The node's box or the box of one of its children is in the hit stack.
+	NFLAG_IN_HIT_CHAIN              = 1 << 14, // The node is a member of the most recently calculated hit set.
+	NFLAG_MOUSE_OVER                = 1 << 15, // One of the node's boxes is the top of the mouse hit stack.
+	NFLAG_MOUSE_OVER_CHILD          = 1 << 16, // A box of one of the node's children is the top of the mouse hit stack.
+	NFLAG_MOUSE_INSIDE              = 1 << 17, // The node's box or the box of one of its children is in the hit stack.
 
 	/* Selection bits. */				   
-	NFLAG_IN_SELECTION_CHAIN        = 1 << 17, // The node is part of the selection chain.
-	NFLAG_UPDATE_SELECTION_LAYERS   = 1 << 18, // The node's selection state has changed.
+	NFLAG_IN_SELECTION_CHAIN        = 1 << 18, // The node is part of the selection chain.
+	NFLAG_UPDATE_SELECTION_LAYERS   = 1 << 19, // The node's selection state has changed.
 
 	/* Interaction states. */
-	NFLAG_INTERACTION_HIGHLIGHTED   = 1 << 19, // Mouse over.
-	NFLAG_INTERACTION_ACTIVE        = 1 << 20, // Mouse down.
+	NFLAG_INTERACTION_HIGHLIGHTED   = 1 << 20, // Mouse over.
+	NFLAG_INTERACTION_ACTIVE        = 1 << 21, // Mouse down.
 
 	/* Set for nodes that have a box when that box changes size. */
-	NFLAG_WIDTH_CHANGED             = 1 << 21,
-	NFLAG_HEIGHT_CHANGED            = 1 << 22,
+	NFLAG_WIDTH_CHANGED             = 1 << 22,
+	NFLAG_HEIGHT_CHANGED            = 1 << 23,
 
 	/* Bits that say which direction a node expanded or contracted in. It's not
 	 * always possible to say. */
-	NFLAG_NOTIFY_EXPANSION          = 1 << 23, // Send messages when the node expands or contracts.
-	NFLAG_EXPANDED_LEFT             = 1 << 24, // The left edge of the node has moved.
-	NFLAG_EXPANDED_RIGHT            = 1 << 25, // The right edge of the node has moved.
-	NFLAG_EXPANDED_UP               = 1 << 26, // The top edge of the node has moved.
-	NFLAG_EXPANDED_DOWN             = 1 << 27  // The bottom edge of the node has moved.
+	NFLAG_NOTIFY_EXPANSION          = 1 << 24, // Send messages when the node expands or contracts.
+	NFLAG_EXPANDED_LEFT             = 1 << 25, // The left edge of the node has moved.
+	NFLAG_EXPANDED_RIGHT            = 1 << 26, // The right edge of the node has moved.
+	NFLAG_EXPANDED_UP               = 1 << 27, // The top edge of the node has moved.
+	NFLAG_EXPANDED_DOWN             = 1 << 28  // The bottom edge of the node has moved.
 };
 
 const unsigned NFLAG_EXPANSION_MASK = NFLAG_EXPANDED_LEFT | 
