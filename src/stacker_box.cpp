@@ -788,7 +788,7 @@ Box *build_text_box(Document *document, Node *owner,
 
 /* Sets a box's document position, the first value 'a' being applied to the
  * specified axis, and the second, 'b' to the orthogonal axis. */
-inline bool set_box_position(Document *document, Box *box, float a, float b, 
+static bool set_box_position(Document *document, Box *box, float a, float b, 
 	Axis axis_a = AXIS_H)
 {
 	document;
@@ -813,7 +813,7 @@ inline bool set_box_position(Document *document, Box *box, float a, float b,
 				NFLAG_UPDATE_BOX_LAYERS;
 	} else if (box->cell_code == INVALID_CELL_CODE) {
 		/* The box hasn't moved, but it isn't in the grid (boxes are removed
-		 * from the grid when they are hidden or changed parents). Now we know
+		 * from the grid when they are hidden or change parents). Now we know
 		 * the box's bounds, reinsert it into the grid. */
 		grid_insert(document, box);
 	}
@@ -972,14 +972,14 @@ static void position_children(Document *document, Box *box)
 }
 
 /* Computes document positions for a tree of boxes. */
-void compute_box_bounds(Document *document, Box *box)
+void compute_box_bounds(Document *document, Box *box, bool parent_valid)
 {
 	/* Nothing to do if this box and all its children have correct bounds. */
-	if ((box->flags & BOXFLAG_TREE_BOUNDS_VALID) != 0)
+	if (parent_valid && (box->flags & BOXFLAG_TREE_BOUNDS_VALID) != 0)
 		return;
 
 	/* Reposition the immediate children of this box if required. */
-	if ((box->flags & BOXFLAG_CHILD_BOUNDS_VALID) == 0) {
+	if (!parent_valid || (box->flags & BOXFLAG_CHILD_BOUNDS_VALID) == 0) {
 		/* The root doesn't have a parent to position it, so it has to position
 		 * itself, at (0, 0). */
 		if (box->parent == NULL)
@@ -987,12 +987,13 @@ void compute_box_bounds(Document *document, Box *box)
 		/* Position the chidlren.  */
 		position_children(document, box);
 		box->flags |= BOXFLAG_CHILD_BOUNDS_VALID;
+		parent_valid = false;
 	}
 
 	/* Visit each child. */
 	for (Box *child = box->first_child; child != NULL; 
 		child = child->next_sibling)
-		compute_box_bounds(document, child);
+		compute_box_bounds(document, child, parent_valid);
 
 	/* The bounds of this box and its children are now set. */
 	box->flags |= BOXFLAG_TREE_BOUNDS_VALID;

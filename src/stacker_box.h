@@ -169,7 +169,7 @@ bool set_provisional_size(Document *document, Box *box, Axis axis,
 	float dim, ProvisionalSizeSource source = PSS_BELOW,
 	bool mark_unstable = true, bool post_text_layout = false);
 bool compute_box_sizes(Document *document, Box *box, bool post_text_layout);
-void compute_box_bounds(Document *document, Box *box);
+void compute_box_bounds(Document *document, Box *box, bool parent_valid = true);
 void clear_box_tree_flags(Document *document, Box *box, unsigned mask);
 void update_box_clip(Document *document, Box *box, 
 	const float *parent_clip, int depth, bool must_update = false);
