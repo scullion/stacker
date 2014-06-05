@@ -162,7 +162,7 @@ const char * const KEYWORD_STRINGS[NUM_KEYWORDS] = {
 	"if",
 	"endif",
 	"else",
-	"elseif",
+	"elif",
 	"include",
 	"and",
 	"or",
@@ -1394,7 +1394,7 @@ int CompiledTemplate::parse_conditional_directive(CompilerState *cs)
 			/* Only the first clause may begin with "if". */
 			if (num_clauses != 0) {
 				return set_error(cs, TE_UNEXPECTED_TOKEN, 
-					"{% endif %} or {% else[if] %}");
+					"{% endif %}, {% elif %} or {% endif %}");
 			}
 		} else if (keyword == TTOK_ELSE || keyword == TTOK_ELSEIF) {
 			/* The first clause must begin with "if". */
@@ -2295,9 +2295,9 @@ void unit_test(FILE *os)
 
 		"{% if var_false %}This shouldn't display.{% else %}This should display.{% endif %}",
 
-		"{% if 10 < 5 %}This shouldn't display.{% elseif 1 == 0 %}This shouldn't display.{% else %}This should display.{% endif %}",
+		"{% if 10 < 5 %}This shouldn't display.{% elif 1 == 0 %}This shouldn't display.{% else %}This should display.{% endif %}",
 
-		"{% if var_false %}This shouldn't display: {{ var_pear }}{% elseif var_false %}This shouldn't display: {{ var_apple }}.{% elseif var_true %}This should display: {{ var_orange }}.{% endif %}",
+		"{% if var_false %}This shouldn't display: {{ var_pear }}{% elif var_false %}This shouldn't display: {{ var_apple }}.{% elif var_true %}This should display: {{ var_orange }}.{% endif %}",
 	
 		"I though it would be nice to include an {% include \"stkr://apple\" %}, or perhaps an {% include \"stkr://orange\" %}.",
 
