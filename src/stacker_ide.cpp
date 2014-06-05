@@ -1769,12 +1769,16 @@ static BOOL CALLBACK gui_dialog_proc(HWND hwnd, unsigned message, WPARAM wp, LPA
 	} else if (message == WM_SETFOCUS) {
 		return TRUE;
 	} else if (message == WM_VSCROLL) {
+		SCROLLINFO info;
+		info.cbSize = sizeof(SCROLLINFO);
+		info.fMask = SIF_POS | SIF_TRACKPOS;
+		HWND scroll_bar = GetDlgItem(state->dialog_window, IDC_DOC_VSCROLL);
+		GetScrollInfo(scroll_bar, SB_CTL, &info);
 		float new_x = state->doc_scroll_x;
 		float new_y = state->doc_scroll_y;
 		int code = LOWORD(wp);
-		int position = HIWORD(wp);
 		if (code == SB_THUMBPOSITION || code == SB_THUMBTRACK)
-			new_y = (float)position;
+			new_y = (float)info.nTrackPos;
 		gui_set_scroll_pos(state, new_x, new_y);
 		gui_check_paint_clock(state); 
 		return FALSE;
