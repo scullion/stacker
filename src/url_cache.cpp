@@ -27,6 +27,7 @@ struct Handle {
 	short notify;
 	unsigned short flags;
 	void *user_data;
+	unsigned data_size;
 	Handle *next;
 	Handle *prev;
 };
@@ -898,6 +899,26 @@ static Entry *cache_get(Cache *cache, uint64_t key)
 	return iter != cache->entries.end() ? iter->second : NULL;
 }
 
+/* Helper to retrieve a cache entry by URL or key. */
+static Entry *cache_get(Cache *cache, const char *url, int length, uint64_t key,
+	ParsedUrl **out_parsed_url, uint64_t *out_key)
+{
+	/* Parse the URL. */
+	*out_parsed_url = NULL;
+	*out_key = key;
+	if (url != NULL) {
+		ParsedUrl *parsed = parse_url(url, length);
+		if (parsed->code != URLPARSE_OK) {
+			delete [] parsed;
+			return NULL;
+		}
+		key = murmur3_64(parsed->url, parsed->length);
+		*out_parsed_url = parsed;
+		*out_key = key;
+	}
+	return cache_get(cache, key);
+}
+
 static bool cache_is_local_url(Cache *cache, const ParsedUrl *url)
 {
 	MimeType mime_type;
@@ -934,19 +955,42 @@ static void cache_delete_entry(Cache *cache, Entry *entry)
 	cache_deallocate_entry(cache, entry);
 }
 
+static Handle *cache_find_handle_by_sink(Entry *entry, int sink_id)
+{
+	for (Handle *handle = entry->handles; handle != NULL; handle = handle->next)
+		if (handle->notify == sink_id)
+			return handle;
+	return NULL;
+}
+
+static Handle *cache_find_handle_by_user_data(Entry *entry, void *user_data)
+{
+	for (Handle *handle = entry->handles; handle != NULL; handle = handle->next)
+		if (handle->user_data == user_data)
+			return handle;
+	return NULL;
+}
+
+/* Deletes an entry, or, if a handle requires that the URL be kept, clears the
+ * entry's data leaving the entry itself (and its URL) intact. */
+static void cache_evict_entry(Cache *cache, Entry *entry, unsigned handle_flags)
+{
+	if ((handle_flags & URL_FLAG_KEEP_URL) != 0 && entry->url != NULL)
+		cache_set_entry_data(entry, NULL, 0, MIMETYPE_NONE, false);
+	else
+		cache_delete_entry(cache, entry);
+}
+
 static Handle *cache_add_handle(Cache *cache, Entry *entry, 
-	void *user_data, int sink_id, unsigned flags)
+	void *user_data, unsigned user_data_size, int sink_id, unsigned flags)
 {
 	cache;
+	
 	Handle *handle = NULL;
-	if ((flags & URL_FLAG_REUSE_SINK_HANDLE) && sink_id != INVALID_NOTIFY_SINK_ID) {
-		for (handle = entry->handles; handle != NULL; handle = handle->next)
-			if (handle->notify == sink_id)
-				break;
-	} else if ((flags & URL_FLAG_REUSE_DATA_HANDLE) != 0 && user_data != NULL) {
-		for (handle = entry->handles; handle != NULL; handle = handle->next)
-			if (handle->user_data == user_data)
-				break; 
+	if ((flags & URL_FLAG_REUSE_DATA_HANDLE) != 0) {
+		handle = cache_find_handle_by_user_data(entry, user_data);
+	} else if ((flags & URL_FLAG_REUSE_SINK_HANDLE) != 0) {
+		handle = cache_find_handle_by_sink(entry, sink_id);
 	}
 	if (handle == NULL) {
 		handle = new Handle();
@@ -959,6 +1003,7 @@ static Handle *cache_add_handle(Cache *cache, Entry *entry,
 		handle->notify = (short)sink_id;
 		handle->flags = (unsigned short)flags;
 		handle->user_data = user_data;
+		handle->data_size = user_data_size;
 	}
 	return handle;
 }
@@ -1056,19 +1101,9 @@ static UrlFetchState cache_query_handle(Cache *cache, Handle *handle,
 static Entry *cache_request_url(Cache *cache, const char *url, int length,
 	UrlKey key, UrlFetchPriority priority, unsigned ttl_secs, unsigned flags)
 {
-	/* Parse the URL. */
-	ParsedUrl *parsed = NULL;
-	if (url != NULL) {
-		parsed = parse_url(url, length);
-		if (parsed->code != URLPARSE_OK) {
-			delete [] parsed;
-			return INVALID_URL_KEY;
-		}
-		key = murmur3_64(parsed->url, parsed->length);
-	}
-
 	/* Update the entry, creating it if necessary. */
-	Entry *entry = cache_get(cache, key);
+	ParsedUrl *parsed = NULL;
+	Entry *entry = cache_get(cache, url, length, key, &parsed, &key);
 	if (entry == NULL) {
 		if (parsed != NULL) {
 			entry = cache_insert(cache, key, parsed, priority, ttl_secs, flags);
@@ -1215,16 +1250,46 @@ static void cache_unlock_handle(Cache *cache, UrlHandle handle)
 	cache_unlock(cache);
 }
 
-static void *cache_set_user_data(Cache *cache, UrlHandle handle, 
-	void *user_data)
+/* Returns a handle's user data pointer. */
+static void *cache_get_user_data(Cache *cache, UrlHandle handle)
 {
 	cache;
+	return handle != NULL ? ((Handle *)handle)->user_data : NULL;
+}
+
+/* Atomically sets a handle's user data pointer and copies the value of 
+ * URL_FLAG_PREVENT_EVICT from 'flags' into the handle. The suplied data size is
+ * the handle's reported contribution to the cache's memory usage. */
+static void *cache_set_user_data(Cache *cache, UrlHandle handle, 
+	void *user_data, unsigned data_size, unsigned flags)
+{
+	cache_lock(cache);
 	if (handle != NULL) {
-		Handle *hd = (Handle *)handle;
-		std::swap(hd->user_data, user_data);
-		return user_data;
-	} 
-	return NULL;
+		Handle *h = (Handle *)handle;
+		std::swap(h->user_data, user_data);
+		h->flags &= ~URL_FLAG_PREVENT_EVICT;
+		h->flags |= flags & URL_FLAG_PREVENT_EVICT;
+		h->data_size = data_size;
+	} else {
+		user_data = NULL;
+	}
+	cache_unlock(cache);
+	return user_data;
+}
+
+/* Sets or clears a mask of handle flags. */
+static void cache_set_handle_flags(Cache *cache, UrlHandle handle, 
+	unsigned mask, bool value)
+{
+	if (handle == NULL)
+		return;
+	cache_lock(cache);
+	Handle *h = (Handle *)handle;
+	if (value)
+		h->flags |= mask;
+	else
+		h->flags &= ~mask;
+	cache_unlock(cache);
 }
 
 static ParsedUrl *cache_get_url(Cache *cache, UrlHandle handle, 
@@ -1246,18 +1311,12 @@ static bool cache_set_data(Cache *cache, const char *url, int length,
 	const void *data, unsigned size, MimeType mime_type,
 	unsigned ttl_secs, bool copy = true)
 {
-	/* Parse the URL. */
-	ParsedUrl *parsed = parse_url(url, length);
-	if (parsed->code != URLPARSE_OK) {
-		delete [] parsed;
-		return false;
-	}
-	UrlKey key = murmur3_64(parsed->url, parsed->length);
-
 	/* Replace the entry's data, creating a new entry if necessary. */
 	bool success = false;
 	cache_lock(cache);
-	Entry *entry = cache_get(cache, key);
+	ParsedUrl *parsed = NULL;
+	uint64_t key = INVALID_URL_KEY;
+	Entry *entry = cache_get(cache, url, length, INVALID_URL_KEY, &parsed, &key);
 	if (entry == NULL) {
 		/* No need to create an entry if there's no data. */
 		if (data == NULL || size == 0)
@@ -1416,6 +1475,7 @@ static void cache_evict_lru(Cache *cache)
 	struct Evictable {
 		Entry *entry;
 		unsigned size;
+		unsigned flags;
 	} evictable[MAX_EVICTABLE];
 	unsigned num_evictable = 0, memory_used = 0;
 	clock_t now = cache->clock;
@@ -1424,27 +1484,25 @@ static void cache_evict_lru(Cache *cache)
 		next = entry->fetch_next;
 
 		/* Calculate the memory cost of the entry, accounting for the user
-		 * data in each handle, and also giving each handle's notify callback 
-		 * the chance to prevent the eviction by returning PREVENT_EVICT. */
+		 * data in each handle. */
 		unsigned data_size = sizeof(Entry) + entry->data_size;
-		bool prevent_evict = false;
+		unsigned handle_flags = 0;
 		for (Handle *handle = entry->handles; handle != NULL; 
 			handle = handle->next) {
-			if ((handle->flags & URL_FLAG_PREVENT_EVICT) != 0) {
-				prevent_evict = true;
-				break;
-			}
-			unsigned rc = cache_notify_handle(cache, handle, URL_QUERY_EVICT);
-			if (rc == PREVENT_EVICT) {
-				prevent_evict = true;
-				break;
-			}
-			data_size += rc;
+			handle_flags |= handle->flags;
+			data_size += handle->data_size;
 		}
-		if (prevent_evict)
+		memory_used += data_size;
+
+		/* Do nothing if a handle is preventing eviction. */
+		if ((handle_flags & URL_FLAG_PREVENT_EVICT) != 0)
 			continue;
 
-		memory_used += data_size;
+		/* If the entry has no data and we need to keep the entry itself
+		 * because a handle requires the URL, there's nothing to do. */
+		if (entry->data_size == 0 && entry->url != NULL && 
+			(handle_flags & URL_FLAG_KEEP_URL) != 0)
+			continue;
 
 		/* Locked entries can't be evicted. */
 		if (entry->lock_count != 0)
@@ -1455,10 +1513,11 @@ static void cache_evict_lru(Cache *cache)
 		clock_t age = now - entry->last_used;
 		if (entry->ttl_secs != 0 && age > clock_t(entry->ttl_secs * CLOCKS_PER_SEC)) {
 			memory_used -= data_size;
-			cache_delete_entry(cache, entry);
+			cache_evict_entry(cache, entry, handle_flags);
 		} else {
 			evictable[num_evictable].entry = entry;
 			evictable[num_evictable].size = data_size;
+			evictable[num_evictable].flags = handle_flags;
 			if (++num_evictable == MAX_EVICTABLE)
 				break;
 		}
@@ -1491,7 +1550,7 @@ static void cache_evict_lru(Cache *cache)
 			"Memory used now %uKB, limit %uKB.\n", 
 			evictable[0].entry->key, evictable[0].size / 1024, 
 			memory_used / 1024, cache->memory_limit / 1024);
-		cache_delete_entry(cache, evictable[0].entry);
+		cache_evict_entry(cache, evictable[0].entry, evictable[0].flags);
 		if (memory_used <= cache->memory_limit)
 			break;
 		std::pop_heap(evictable, evictable + num_evictable, prefer);
@@ -1499,7 +1558,8 @@ static void cache_evict_lru(Cache *cache)
 }
 
 static UrlHandle cache_create_handle(Cache *cache, const char *url, int length, 
-	UrlKey key, UrlFetchPriority priority, unsigned ttl_secs, void *user_data, 
+	UrlKey key, UrlFetchPriority priority, unsigned ttl_secs, 
+	void *user_data, unsigned user_data_size, 
 	int notify_sink_id, unsigned flags)
 {
 	Handle *handle = NULL;
@@ -1507,9 +1567,30 @@ static UrlHandle cache_create_handle(Cache *cache, const char *url, int length,
 	Entry *entry = cache_request_url(cache, url, length, key, priority, 
 		ttl_secs, 0);
 	if (entry != NULL)
-		handle = cache_add_handle(cache, entry, user_data, notify_sink_id, flags);
+		handle = cache_add_handle(cache, entry,	user_data, user_data_size,
+			notify_sink_id, flags);
 	cache_unlock(cache);
 	return (UrlHandle)handle;
+}
+
+/* Looks up the entry for a URL or key and searches its handle list for a handle 
+ * matching either a user data pointer or a notify sink ID. */
+static Handle *cache_find_handle(Cache *cache, const char *url, int length,
+	UrlKey key, void *user_data, int sink_id)
+{
+	cache_lock(cache);
+	Handle *handle = NULL;
+	ParsedUrl *parsed = NULL;
+	Entry *entry = cache_get(cache, url, length, key, &parsed, &key);
+	if (entry != NULL) {
+		if (sink_id != INVALID_NOTIFY_SINK_ID) {
+			handle = cache_find_handle_by_sink(entry, sink_id);
+		} else if (user_data != NULL) {
+			handle = cache_find_handle_by_user_data(entry, user_data);
+		}
+	}
+	cache_unlock(cache);
+	return handle;
 }
 
 static void cache_request_handle(Cache *cache, UrlHandle handle, 
@@ -1708,19 +1789,20 @@ void UrlCache::set_local_fetch_callback(LocalFetchCallback callback, void *data)
 }
 
 UrlHandle UrlCache::create_handle(const char *url, int length,
-	UrlFetchPriority priority, unsigned ttl_secs, void *user_data, 
+	UrlFetchPriority priority, unsigned ttl_secs, 
+	void *user_data, unsigned user_data_size,
 	int notify_sink_id, unsigned flags)
 {
 	return cache_create_handle(cache, url, length, INVALID_URL_KEY, 
-		priority, ttl_secs, user_data, notify_sink_id, flags);
+		priority, ttl_secs, user_data, user_data_size, notify_sink_id, flags);
 }
 
-UrlHandle UrlCache::create_handle(UrlKey key, 
-	UrlFetchPriority priority, unsigned ttl_secs, void *user_data, 
+UrlHandle UrlCache::create_handle(UrlKey key, UrlFetchPriority priority, 
+	unsigned ttl_secs, void *user_data, unsigned user_data_size,
 	int notify_sink_id, unsigned flags)
 {
 	return cache_create_handle(cache, NULL, 0, key, priority, ttl_secs, 
-		user_data, notify_sink_id, flags);
+		user_data, user_data_size, notify_sink_id, flags);
 }
 
 void UrlCache::destroy_handle(UrlHandle handle)
@@ -1761,12 +1843,13 @@ UrlKey UrlCache::key(UrlHandle handle) const
 
 void *UrlCache::user_data(UrlHandle handle)
 {
-	return handle != NULL ? ((Handle *)handle)->user_data : NULL;
+	return cache_get_user_data(cache, handle);
 }
 
-void *UrlCache::set_user_data(UrlHandle handle, void *user_data)
+void *UrlCache::set_user_data(UrlHandle handle, void *data, unsigned size, 
+	unsigned flags)
 {
-	return cache_set_user_data(cache, handle, user_data);
+	return cache_set_user_data(cache, handle, data, size, flags);
 }
 
 ParsedUrl *UrlCache::url(UrlHandle handle, void *buffer, unsigned buffer_size)
@@ -1806,6 +1889,35 @@ bool UrlCache::is_local_url(const char *url, int length)
 bool UrlCache::is_local_url(const ParsedUrl *url)
 {
 	return cache_is_local_url(cache, url);
+}
+
+UrlHandle UrlCache::find_data_handle(UrlKey key, void *user_data)
+{
+	return (UrlHandle)cache_find_handle(cache, NULL, -1, key, user_data, 
+		INVALID_NOTIFY_SINK_ID);
+}
+
+UrlHandle UrlCache::find_data_handle(const char *url, int length, 
+	void *user_data)
+{
+	return (UrlHandle)cache_find_handle(cache, url, length, INVALID_URL_KEY, 
+		user_data, INVALID_NOTIFY_SINK_ID);
+}
+
+UrlHandle UrlCache::find_sink_handle(UrlKey key, int sink_id)
+{
+	return (UrlHandle)cache_find_handle(cache, NULL, -1, key, NULL, sink_id);
+}
+
+UrlHandle UrlCache::find_sink_handle(const char *url, int length, int sink_id)
+{
+	return (UrlHandle)cache_find_handle(cache, url, length, INVALID_URL_KEY, 
+		NULL, sink_id);
+}
+
+void UrlCache::set_handle_flags(UrlHandle handle, unsigned flags, bool value)
+{
+	cache_set_handle_flags(cache, handle, flags, value);
 }
 
 /*

@@ -37,16 +37,15 @@ enum UrlFetchState {
 
 enum UrlNotification {
 	URL_NOTIFY_FETCH,
-	URL_NOTIFY_EVICT,
-	URL_QUERY_EVICT
+	URL_NOTIFY_EVICT
 };
 
 enum UrlFlag {
 	URL_FLAG_DISCARD           = 1 << 0, // Evict data when the handle is unlocked.
-	URL_FLAG_REUSE_SINK_HANDLE = 1 << 1, // If there's an existing handle with the same notification sink, return it instead of creating a new one.
-	URL_FLAG_REUSE_DATA_HANDLE = 1 << 2, // If there's an existing handle with the same user data, return it instead of creating a new one.
-	URL_FLAG_KEEP_URL          = 1 << 3, // Keep the parsed URL string in an entry after fetch completion.
-	URL_FLAG_PREVENT_EVICT     = 1 << 4  // Set on a a handle, the entry will not be evicted as long as the handle exists.
+	URL_FLAG_KEEP_URL          = 1 << 1, // Keep the parsed URL string in an entry after fetch completion.
+	URL_FLAG_PREVENT_EVICT     = 1 << 2, // Set on a a handle, the entry will not be evicted as long as the handle exists.
+	URL_FLAG_REUSE_DATA_HANDLE = 1 << 3, // If the entry already has a handle with the same user data pointer, return that instead of creating a new handle.
+	URL_FLAG_REUSE_SINK_HANDLE = 1 << 4  // If the entry already has a handle with the same notify sink, return that instead of creating a new handle.
 };
 
 enum UrlParseCode {
@@ -87,7 +86,6 @@ typedef bool (*LocalFetchCallback)(void *data, const ParsedUrl *url,
 const unsigned DEFAULT_MEMORY_LIMIT = 0x800000;
 const unsigned DEFAULT_FETCH_SLOTS  = 5;
 const unsigned DEFAULT_TTL_SECS     = 5 * 60;
-const unsigned PREVENT_EVICT        = unsigned(-1);
 const int INVALID_NOTIFY_SINK_ID    = -1;
 const UrlHandle INVALID_URL_HANDLE  = 0;
 const UrlKey INVALID_URL_KEY        = 0ULL;
@@ -152,13 +150,21 @@ public:
 	 */
 	UrlHandle create_handle(const char *url, int length = -1,
 		UrlFetchPriority priority = URLP_NORMAL,
-		unsigned ttl_secs = DEFAULT_TTL_SECS, void *user_data = 0, 
-		int notify_sink = INVALID_NOTIFY_SINK_ID, unsigned flags = 0);
+		unsigned ttl_secs = DEFAULT_TTL_SECS,
+		void *user_data = 0, unsigned user_data_size = 0,
+		int notify_sink = INVALID_NOTIFY_SINK_ID, 
+		unsigned flags = 0);
 	UrlHandle create_handle(UrlKey key, 
 		UrlFetchPriority priority = URLP_NORMAL,
-		unsigned ttl_secs = DEFAULT_TTL_SECS, void *user_data = 0, 
-		int notify_sink = INVALID_NOTIFY_SINK_ID, unsigned flags = 0);
+		unsigned ttl_secs = DEFAULT_TTL_SECS, 
+		void *user_data = 0, unsigned user_data_size = 0,
+		int notify_sink = INVALID_NOTIFY_SINK_ID, 
+		unsigned flags = 0);
 	void destroy_handle(UrlHandle handle);
+	UrlHandle find_data_handle(UrlKey key, void *user_data);
+	UrlHandle find_data_handle(const char *url, int length, void *user_data);
+	UrlHandle find_sink_handle(UrlKey key, int sink_id);
+	UrlHandle find_sink_handle(const char *url, int length, int sink_id);
 	const void *lock(UrlHandle handle, unsigned *out_size = 0, 
 		MimeType *out_mime_type = 0);
 	void unlock(UrlHandle handle);
@@ -167,11 +173,13 @@ public:
 		void **out_user_data = 0);
 	void request(UrlHandle handle, UrlFetchPriority priority = URLP_NORMAL);
 	void *user_data(UrlHandle handle);
-	void *set_user_data(UrlHandle handle, void *user_data);
+	void *set_user_data(UrlHandle handle, void *data, unsigned size = 0, 
+		unsigned flags = 0);
+	void set_handle_flags(UrlHandle handle, unsigned flags, bool value = true);
 	void set_notify(UrlHandle handle, int sink_id);
 	ParsedUrl *url(UrlHandle handle, void *buffer = 0, 
 		unsigned buffer_size = 0);
-	
+
 private:
 
 	struct Cache *cache;

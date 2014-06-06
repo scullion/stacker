@@ -925,8 +925,6 @@ unsigned TemplateProcessor::notify_callback(UrlHandle handle,
 		/* Release the handle's reference to the CT. */
 		processor->destroy(ct);
 		processor->cache->destroy_handle(handle);
-	} else if (type == URL_QUERY_EVICT) {
-		return ct->memory_usage();
 	}
 	return 0;
 }
@@ -967,7 +965,8 @@ CompiledTemplate *TemplateProcessor::create_from_url(const char *url,
 		return NULL;
 	/* FIXME (TJM): URL_FLAG_KEEP_URL for debugging here. */
 	UrlHandle handle = cache->create_handle(url, length, URLP_NORMAL,
-		DEFAULT_TTL_SECS, NULL, notify_sink_id, URL_FLAG_REUSE_SINK_HANDLE | URL_FLAG_KEEP_URL);
+		DEFAULT_TTL_SECS, NULL, 0, notify_sink_id, 
+		URL_FLAG_REUSE_SINK_HANDLE  | URL_FLAG_KEEP_URL);
 	return create_from_url_internal(handle);
 }
 
@@ -976,33 +975,35 @@ CompiledTemplate * TemplateProcessor::create_from_url(UrlKey key)
 	if (cache == NULL)
 		return NULL;
 	UrlHandle handle = cache->create_handle(key, URLP_NORMAL,
-		DEFAULT_TTL_SECS, NULL, notify_sink_id, URL_FLAG_REUSE_SINK_HANDLE | URL_FLAG_KEEP_URL);
+		DEFAULT_TTL_SECS, NULL, 0, notify_sink_id, 
+		URL_FLAG_REUSE_SINK_HANDLE  | URL_FLAG_KEEP_URL);
 	return create_from_url_internal(handle);
 }
 
-CompiledTemplate * TemplateProcessor::create_from_url_internal(UrlHandle handle)
+CompiledTemplate *TemplateProcessor::create_from_url_internal(UrlHandle handle)
 {
 	/* Do we already have a compiled template? */
+	cache->lock_cache();
 	CompiledTemplate *ct = (CompiledTemplate *)cache->user_data(handle);
 	if (ct != NULL) {
 		ct->use_count++;
-		return ct;
-	}
-
-	/* If data is available for the URL, make a new compiled template and
-	 * store it in the handle. */
-	const char *url_data;
-	unsigned data_size;
-	url_data = (const char *)cache->lock(handle, &data_size);
-	if (url_data != NULL) {
-		ct = new CompiledTemplate(this);
-		ct->compile(url_data, data_size);
-		cache->set_user_data(handle, ct);
-		ct->use_count++; /* The handle itself takes a reference. */
-		cache->unlock(handle);
 	} else {
-		cache->destroy_handle(handle);
+		/* If data is available for the URL, make a new compiled template and
+		 * store it in the handle. */
+		const char *url_data;
+		unsigned data_size;
+		url_data = (const char *)cache->lock(handle, &data_size);
+		if (url_data != NULL) {
+			ct = new CompiledTemplate(this);
+			ct->compile(url_data, data_size);
+			ct->use_count++; /* The handle itself takes a reference. */
+			cache->set_user_data(handle, ct, ct->memory_usage());
+			cache->unlock(handle);
+		} else {
+			cache->destroy_handle(handle);
+		}
 	}
+	cache->unlock_cache();
 	return ct;
 }
 
