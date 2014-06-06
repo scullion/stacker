@@ -900,10 +900,8 @@ int set_url(Document *document, const char *url)
 	if (key != cache->key(document->url_handle)) {
 		cache->destroy_handle(document->url_handle);
 		document->url_handle = cache->create_handle(
-			url, -1, URLP_NO_FETCH, 
-			10,  /* FIXME (TJM): DEBUG */ 
-			document, 0,
-			system->document_notify_id,
+			url, -1, URLP_NO_FETCH, DEFAULT_TTL_SECS,
+			document, 0, system->document_notify_id,
 			URL_FLAG_KEEP_URL);
 	}
 
