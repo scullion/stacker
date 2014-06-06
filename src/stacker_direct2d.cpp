@@ -636,23 +636,9 @@ static unsigned image_url_notify_callback(UrlHandle handle,
 	UrlNotification type, UrlKey key, BackEnd *back_end, NetworkImage *ni, 
 	UrlFetchState fetch_state)
 {
-	handle; back_end; key; fetch_state;
-
-	if (ni != NULL) {
-		if (type == URL_NOTIFY_EVICT) {
-			fprintf(stdout, "Destroying ID2D1Bitmap for %llX.\n", key);
-			if (ni->d2d_bitmap != NULL)
-				ni->d2d_bitmap->Release();
-			if (ni->pixels != NULL)
-				stbi_image_free(ni->pixels);
-			delete ni;
-			back_end->url_cache->destroy_handle(handle);
-		} else if (type == URL_QUERY_EVICT) {
-			if (ni->use_count != 0)
-				return PREVENT_EVICT;
-			return ni->width * ni->height * 4;
-		}
-	}
+	key; fetch_state;
+	if (ni != NULL && type == URL_NOTIFY_EVICT)
+		platform_destroy_network_image(back_end, back_end->url_cache, handle);
 	return 0;
 }
 
@@ -662,6 +648,7 @@ UrlHandle create_network_image_internal(BackEnd *back_end, UrlCache *cache,
 {
 	back_end;
 
+	cache->lock_cache();
 	NetworkImage *image = (NetworkImage *)cache->user_data(handle);
 	if (image == NULL) {
 		image = new NetworkImage();
@@ -669,10 +656,11 @@ UrlHandle create_network_image_internal(BackEnd *back_end, UrlCache *cache,
 		image->width = 0;
 		image->height = 0;
 		image->d2d_bitmap = NULL;
-		image->use_count = 0;
+		image->use_count = 1; /* The handle's reference. */
 		cache->set_user_data(handle, image);
-	}
+	} 
 	image->use_count++;
+	cache->unlock_cache();
 	return handle;
 }
 
@@ -681,7 +669,7 @@ UrlHandle platform_create_network_image(BackEnd *back_end,
 {
 	UrlHandle handle = cache->create_handle(url, -1, 
 		URLP_NORMAL, DEFAULT_TTL_SECS,
-		NULL, back_end->image_notify_id, 
+		NULL, 0, back_end->image_notify_id, 
 		URL_FLAG_DISCARD | URL_FLAG_REUSE_SINK_HANDLE);
 	return create_network_image_internal(back_end, cache, handle);
 }
@@ -691,7 +679,7 @@ UrlHandle platform_create_network_image(BackEnd *back_end,
 {
 	UrlHandle handle = cache->create_handle(key, 
 		URLP_NORMAL, DEFAULT_TTL_SECS,
-		NULL, back_end->image_notify_id, 
+		NULL, 0, back_end->image_notify_id, 
 		URL_FLAG_DISCARD | URL_FLAG_REUSE_SINK_HANDLE);
 	return create_network_image_internal(back_end, cache, handle);
 }
@@ -700,13 +688,21 @@ void platform_destroy_network_image(BackEnd *back_end,
 	UrlCache *cache, UrlHandle image_handle)
 {
 	back_end;
-
 	if (image_handle == INVALID_URL_HANDLE)
 		return;
 	cache->lock_cache();
 	NetworkImage *image = (NetworkImage *)cache->user_data(image_handle);
 	assertb(image != NULL && image->use_count != 0);
-	--image->use_count;
+	if (--image->use_count == 0) {
+		fprintf(stdout, "Destroying ID2D1Bitmap for %llX.\n", 
+			cache->key(image_handle));
+		if (image->d2d_bitmap != NULL)
+			image->d2d_bitmap->Release();
+		if (image->pixels != NULL)
+			stbi_image_free(image->pixels);
+		delete image;
+		cache->destroy_handle(image_handle);
+	}
 	cache->unlock_cache();
 }
 
@@ -730,6 +726,7 @@ static bool get_network_image_pixels(BackEnd *back_end,
 	image->width = (unsigned)width;
 	image->height = (unsigned)height;
 	cache->unlock(image_handle);
+	cache->set_user_data(image_handle, image, width * height * sizeof(uint32_t));
 	return image->pixels != NULL;
 }
 

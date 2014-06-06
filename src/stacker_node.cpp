@@ -2002,6 +2002,7 @@ void do_text_layout(Document *document, Node *node)
 	if (container_box->axis == AXIS_V && (container_box->flags & 
 		BOXFLAG_WIDTH_FROM_PARENT_DEFINED) != 0) {
 		float dim = container_box->size_from_parent[AXIS_H];
+		dim -= padding_and_margins(container_box, AXIS_H);
 		line_width = (unsigned)round_signed(dim);
 	}
 

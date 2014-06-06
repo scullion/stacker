@@ -894,16 +894,19 @@ int set_url(Document *document, const char *url)
 	UrlCache *cache = system->url_cache;
 	if (cache == NULL)
 		return STKR_ERROR;
-	UrlHandle handle = cache->create_handle(
-		url, -1, URLP_NO_FETCH, 
-		DEFAULT_TTL_SECS, 
-		document, 
-		system->document_notify_id,
-		URL_FLAG_REUSE_DATA_HANDLE | URL_FLAG_KEEP_URL);
-	if (handle != document->url_handle) {
+	
+	/* If the URL is changing, make a new notification handle. */
+	UrlKey key = cache->key(url);
+	if (key != cache->key(document->url_handle)) {
 		cache->destroy_handle(document->url_handle);
-		document->url_handle = handle;
+		document->url_handle = cache->create_handle(
+			url, -1, URLP_NO_FETCH, 
+			10,  /* FIXME (TJM): DEBUG */ 
+			document, 0,
+			system->document_notify_id,
+			URL_FLAG_KEEP_URL);
 	}
+
 	set_navigation_state(document, DOCNAV_IDLE);
 	return STKR_OK;
 }
