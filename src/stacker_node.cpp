@@ -1508,7 +1508,7 @@ static void read_layer_position(Node *node, LayerPosition *lp)
 			TOKEN_BACKGROUND_OFFSET_X + axis, &lp->offsets[axis]);
 	}
 	lp->placement = (unsigned char)read_mode(node, 
-		TOKEN_BACKGROUND_PLACEMENT, BBOX_PADDING);
+		TOKEN_BACKGROUND_BOX, BBOX_PADDING);
 	lp->positioning_mode = (unsigned char)read_mode(node, 
 		TOKEN_BACKGROUND_SIZE, VLPM_STANDARD);
 }

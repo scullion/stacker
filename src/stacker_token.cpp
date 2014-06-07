@@ -93,7 +93,7 @@ extern const char * const TOKEN_STRINGS[NUM_TOKENS] = {
 	"background-offset-y",
 	"background-horizontal-alignment",
 	"background-vertical-alignment",
-	"background-placement",
+	"background-box",
 	"border-color",
 	"border-width",
 	"tint",
@@ -145,7 +145,7 @@ extern const char * const TOKEN_STRINGS[NUM_TOKENS] = {
 	/* Background placement. */
 	"content-box",
 	"padding-box",
-	"outer-box",
+	"margin-box",
 
 	/* Pane types. */
 	"flat",
@@ -216,7 +216,7 @@ bool is_enum_token(int token)
 		case TOKEN_FILL:
 		case TOKEN_CONTENT_BOX:
 		case TOKEN_PADDING_BOX:
-		case TOKEN_OUTER_BOX:
+		case TOKEN_MARGIN_BOX:
 		case TOKEN_BLOCK:
 		case TOKEN_INLINE:
 		case TOKEN_INLINE_CONTAINER:
@@ -255,7 +255,7 @@ bool is_background_attribute(int token)
 		case TOKEN_BACKGROUND_OFFSET_Y:
 		case TOKEN_BACKGROUND_HORIZONTAL_ALIGNMENT:
 		case TOKEN_BACKGROUND_VERTICAL_ALIGNMENT:
-		case TOKEN_BACKGROUND_PLACEMENT:
+		case TOKEN_BACKGROUND_BOX:
 		case TOKEN_BORDER_COLOR:
 		case TOKEN_BORDER_WIDTH:
 		case TOKEN_TINT:

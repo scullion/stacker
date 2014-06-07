@@ -142,7 +142,7 @@ AttributeSemantic attribute_semantic(int name)
 			return ASEM_WRAP_MODE;
 		case TOKEN_BACKGROUND_SIZE:
 			return ASEM_BACKGROUND_SIZE;
-		case TOKEN_BACKGROUND_PLACEMENT:
+		case TOKEN_BACKGROUND_BOX:
 		case TOKEN_CLIP_BOX:
 			return ASEM_BOUNDING_BOX;
 		case TOKEN_CURSOR:
