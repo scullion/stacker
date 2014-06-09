@@ -600,13 +600,13 @@ void update_document(Document *document)
 	lmsg("\nBegin first box pass.\n");
 	if ((document->flags & DOCFLAG_DEBUG_FULL_LAYOUT) != 0)
 		clear_box_tree_flags(document, root->box, BOXFLAG_LAYOUT_MASK);
-	compute_sizes_iteratively(document, root, false);
+	compute_sizes_iteratively(document, PASS_PRE_TEXT_LAYOUT, root);
 	
 	lmsg("\nBegin text layout pass.\n");
 	do_text_layout(document, root);
 	
 	lmsg("\nBegin second box pass.\n");
-	compute_sizes_iteratively(document, root, true);
+	compute_sizes_iteratively(document, PASS_POST_TEXT_LAYOUT, root);
 
 	lmsg("\nBegin bounds pass.\n");
 	compute_box_bounds(document, root->box);

@@ -156,7 +156,7 @@ void dump_boxes(const Document *document, const Box *box, unsigned indent)
 		"[%s] node=%s axis=%d children=%d "
 		"\n% *s    | "
 		"ideal=(%.2f/%d, %.2f/%d) "
-		"size=(%.2f, %.2f) sfp=(%.2f, %.2f) "
+		"sizes_from_child=(%.2f, %.2f) sizes_from_parent=(%.2f, %.2f) "
 		"pos=(%.2f, %.2f) "
 		"clip=(%.2f, %.2f, %.2f, %.2f) "
 		"\n% *s    | "
@@ -166,8 +166,18 @@ void dump_boxes(const Document *document, const Box *box, unsigned indent)
 		"pad=(%.2f/%d, %.2f/%d, %.2f/%d, %.2f/%d) "
 		"mrg=(%.2f/%d, %.2f/%d, %.2f/%d, %.2f/%d)"
 		"\n% *s    | "
-		"depends_on_parent=(%u, %u), "
-		"depends_on_children=(%u, %u), "
+		"depends_on_parent[pre_text_layout]=(%u, %u), "
+		"depends_on_children[pre_text_layout]=(%u, %u), "
+		"\n% *s    | "
+		"depends_on_parent[post_text_layout]=(%u, %u), "
+		"depends_on_children[post_text_layout]=(%u, %u), "
+		"\n% *s    | "
+		"preorder[pre_text_layout]=(%u, %u), "
+		"postorder[pre_text_layout]=(%u, %u), "
+		"\n% *s    | "
+		"preorder[post_text_layout]=(%u, %u), "
+		"postorder[post_text_layout]=(%u, %u), "
+		"\n% *s    | "
 		"set_by_parent=(%u, %u)"
 		"\n% *s    | "
 		"tokens=(%d, %d)"
@@ -175,8 +185,10 @@ void dump_boxes(const Document *document, const Box *box, unsigned indent)
 		indent, "", get_box_debug_string(box), node_name, (int)box->axis, num_children,
 		indent, "",
 		box->ideal[AXIS_H], (int)box->mode_dim[AXIS_H], box->ideal[AXIS_V], (int)box->mode_dim[AXIS_V],
-		box->size[AXIS_H], box->size[AXIS_V],
-		box->size_from_parent[AXIS_H], box->size_from_parent[AXIS_V],
+		get_size_directional(box, AXIS_H, false), 
+		get_size_directional(box, AXIS_V, false),
+		get_size_directional(box, AXIS_H, true), 
+		get_size_directional(box, AXIS_V, true),
 		box->pos[AXIS_H], box->pos[AXIS_V],
 		box->clip[0], box->clip[1], box->clip[2], box->clip[3],
 		indent, "",
@@ -188,10 +200,26 @@ void dump_boxes(const Document *document, const Box *box, unsigned indent)
 		box->margin_lower[AXIS_H], box->mode_margin_lower[AXIS_H], box->margin_lower[AXIS_V], box->mode_margin_lower[AXIS_V],
 		box->margin_upper[AXIS_H], box->mode_margin_upper[AXIS_H], box->margin_upper[AXIS_V], box->mode_margin_upper[AXIS_V],
 		indent, "",
-		(box->flags & BOXFLAG_WIDTH_DEPENDS_ON_PARENT) != 0,
-		(box->flags & BOXFLAG_HEIGHT_DEPENDS_ON_PARENT) != 0,
-		(box->flags & BOXFLAG_WIDTH_DEPENDS_ON_CHILDREN) != 0,
-		(box->flags & BOXFLAG_HEIGHT_DEPENDS_ON_CHILDREN) != 0,
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_WIDTH_DEPENDS_ON_PARENT) != 0,
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_HEIGHT_DEPENDS_ON_PARENT) != 0,
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN) != 0,
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_HEIGHT_DEPENDS_ON_CHILDREN) != 0,
+		indent, "",
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_WIDTH_DEPENDS_ON_PARENT) != 0,
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_HEIGHT_DEPENDS_ON_PARENT) != 0,
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN) != 0,
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_HEIGHT_DEPENDS_ON_CHILDREN) != 0,
+		indent, "",
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_WIDTH_PREORDER) != 0,
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_HEIGHT_PREORDER) != 0,
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_WIDTH_POSTORDER) != 0,
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_HEIGHT_POSTORDER) != 0,
+		indent, "",
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_WIDTH_PREORDER) != 0,
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_HEIGHT_PREORDER) != 0,
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_WIDTH_POSTORDER) != 0,
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_HEIGHT_POSTORDER) != 0,
+		indent, "",
 		(box->flags & BOXFLAG_WIDTH_SET_BY_PARENT) != 0,
 		(box->flags & BOXFLAG_HEIGHT_SET_BY_PARENT) != 0,
 		indent, "",

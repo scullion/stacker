@@ -13,45 +13,53 @@ enum Justification;
 enum BoxFlag {
 	BOXFLAG_WIDTH_DEFINED              = 1 <<  0, // Width has been calculated in this or a previous tick.
 	BOXFLAG_HEIGHT_DEFINED             = 1 <<  1, // Height has been calculated in this or a previous tick.
-	BOXFLAG_WIDTH_FROM_PARENT_DEFINED  = 1 <<  2, // Width from parent is defined.
-	BOXFLAG_HEIGHT_FROM_PARENT_DEFINED = 1 <<  3, // Height from parent is defined.
-	BOXFLAG_WIDTH_STABLE               = 1 <<  4, // There's nothing to be gained from visiting this box's horizontal axis.
-	BOXFLAG_HEIGHT_STABLE              = 1 <<  5, // There's nothing to be gained from visiting this box's vertical axis.
-	BOXFLAG_TREE_SIZE_STABLE           = 1 <<  6, // Both STABLE bits are set on all boxes in this subtree.
+	BOXFLAG_WIDTH_STABLE               = 1 <<  2, // There's nothing to be gained from visiting this box's horizontal axis.
+	BOXFLAG_HEIGHT_STABLE              = 1 <<  3, // There's nothing to be gained from visiting this box's vertical axis.
+	BOXFLAG_TREE_SIZE_STABLE           = 1 <<  4, // Both STABLE bits are set on all boxes in this subtree.
+	BOXFLAG_WIDTH_SET_BY_PARENT        = 1 <<  5, // Provisional width came from above.
+	BOXFLAG_HEIGHT_SET_BY_PARENT       = 1 <<  6, // Provisional height came from above.
+	BOXFLAG_WIDTH_FIXED                = 1 <<  7, // Provisional width always equals ideal width and need not be initialized.
+	BOXFLAG_HEIGHT_FIXED               = 1 <<  8, // Provisional height always equals ideal height and need not be initialized.
 
-	BOXFLAG_WIDTH_DEPENDS_ON_PARENT    = 1 <<  7, // Box's width may change when either parent dimension changes.
-	BOXFLAG_HEIGHT_DEPENDS_ON_PARENT   = 1 <<  8, // Box's height may change when either parent dimension changes.
-	BOXFLAG_WIDTH_DEPENDS_ON_CHILDREN  = 1 <<  9, // Box's width may change when any child dimension changes.
-	BOXFLAG_HEIGHT_DEPENDS_ON_CHILDREN = 1 << 10, // Box's height may change when any child dimension changes.
-	BOXFLAG_WIDTH_SET_BY_PARENT        = 1 << 11, // Provisional width came from above.
-	BOXFLAG_HEIGHT_SET_BY_PARENT       = 1 << 12, // Provisional height came from above.
+	BOXFLAG_PARAGRAPH_VALID            = 1 << 10, // Box width has not changed since the last paragraph layout.
 
-	BOXFLAG_PARAGRAPH_VALID            = 1 << 13, // Box width has not changed since the last paragraph layout.
-							           
-	BOXFLAG_BOUNDS_DEFINED             = 1 << 14, // The bounds of this box have been set at some time in the past.
-	BOXFLAG_CHILD_BOUNDS_VALID         = 1 << 15, // The bounds of the immediate children of this box are up to date.
-	BOXFLAG_TREE_BOUNDS_VALID          = 1 << 16, // CHILD_BOUNDS_VALID is set for all boxes in this subtree.
+	BOXFLAG_BOUNDS_DEFINED             = 1 << 11, // The bounds of this box have been set at some time in the past.
+	BOXFLAG_CHILD_BOUNDS_VALID         = 1 << 12, // The bounds of the immediate children of this box are up to date.
+	BOXFLAG_TREE_BOUNDS_VALID          = 1 << 13, // CHILD_BOUNDS_VALID is set for all boxes in this subtree.
 
-	BOXFLAG_TREE_CLIP_VALID            = 1 << 17, // The depths of all recursive children are valid.
+	BOXFLAG_TREE_CLIP_VALID            = 1 << 14, // The depths of all recursive children are valid.
 	
-	BOXFLAG_HIT_TEST                   = 1 << 18, // Mouse events within the box generate interaction events for the owning node.
-	BOXFLAG_HIT_OUTER                  = 1 << 19, // Count the margin as part of the box for the purposes of hit testing.
-	BOXFLAG_SELECTION_ANCHOR           = 1 << 20, // The box can be the anchor that determines the extent of a mouse selection.
-	BOXFLAG_NO_LABEL                   = 1 << 21, // Don't draw debug labels for this box.
+	BOXFLAG_HIT_TEST                   = 1 << 15, // Mouse events within the box generate interaction events for the owning node.
+	BOXFLAG_HIT_OUTER                  = 1 << 16, // Count the margin as part of the box for the purposes of hit testing.
+	BOXFLAG_SELECTION_ANCHOR           = 1 << 17, // The box can be the anchor that determines the extent of a mouse selection.
+	BOXFLAG_NO_LABEL                   = 1 << 18, // Don't draw debug labels for this box.
 
-	BOXFLAG_CLIP_LEFT                  = 1 << 22, // Don't draw pixels left of the box's left edge.
-	BOXFLAG_CLIP_RIGHT                 = 1 << 23, // Don't draw pixels right of the box's right edge.
-	BOXFLAG_CLIP_TOP                   = 1 << 24, // Don't draw pixels above the box's top edge.
-	BOXFLAG_CLIP_BOTTOM                = 1 << 25  // Don't draw pixels below the box's bottom edge.
+	BOXFLAG_CLIP_LEFT                  = 1 << 19, // Don't draw pixels left of the box's left edge.
+	BOXFLAG_CLIP_RIGHT                 = 1 << 20, // Don't draw pixels right of the box's right edge.
+	BOXFLAG_CLIP_TOP                   = 1 << 21, // Don't draw pixels above the box's top edge.
+	BOXFLAG_CLIP_BOTTOM                = 1 << 22  // Don't draw pixels below the box's bottom edge.
 };
 
+/* Per-layout-pass dependency bits. */
+enum PassFlag {
+	PASSFLAG_WIDTH_DEPENDS_ON_PARENT    = 1 <<  0, // Box's width may change when either parent dimension changes.
+	PASSFLAG_HEIGHT_DEPENDS_ON_PARENT   = 1 <<  1, // Box's height may change when either parent dimension changes.
+	PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN  = 1 <<  2, // Box's width may change when any child dimension changes.
+	PASSFLAG_HEIGHT_DEPENDS_ON_CHILDREN = 1 <<  3, // Box's height may change when any child dimension changes.
+	PASSFLAG_WIDTH_PREORDER             = 1 <<  4, // Impose width constraints parent-then-child.
+	PASSFLAG_HEIGHT_PREORDER            = 1 <<  5, // Impose height constraints parent-then-child.
+	PASSFLAG_WIDTH_POSTORDER            = 1 <<  6, // Impose width constraints child-then-parent.
+	PASSFLAG_HEIGHT_POSTORDER           = 1 <<  7  // Impose height constraints child-then-parent.
+};
+
+const unsigned PASSFLAG_ORDER_MASK                = PASSFLAG_WIDTH_PREORDER | PASSFLAG_HEIGHT_PREORDER | PASSFLAG_WIDTH_POSTORDER | PASSFLAG_HEIGHT_POSTORDER;
+const unsigned PASSFLAG_DEPENDS_MASK_WIDTH        = PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN | PASSFLAG_WIDTH_DEPENDS_ON_PARENT;
+const unsigned PASSFLAG_DEPENDS_MASK_HEIGHT       = PASSFLAG_HEIGHT_DEPENDS_ON_CHILDREN | PASSFLAG_HEIGHT_DEPENDS_ON_PARENT;
+const unsigned PASSFLAG_DEPENDS_ON_PARENT_MASK    = PASSFLAG_WIDTH_DEPENDS_ON_PARENT | PASSFLAG_HEIGHT_DEPENDS_ON_PARENT;
+const unsigned PASSFLAG_DEPENDS_ON_CHILDREN_MASK  = PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN | PASSFLAG_HEIGHT_DEPENDS_ON_CHILDREN;
+
 const unsigned BOXFLAG_DEFINED_MASK              = BOXFLAG_WIDTH_DEFINED | BOXFLAG_HEIGHT_DEFINED;
-const unsigned BOXFLAG_DEFINED_PARENT_MASK       = BOXFLAG_WIDTH_FROM_PARENT_DEFINED | BOXFLAG_HEIGHT_FROM_PARENT_DEFINED;
 const unsigned BOXFLAG_STABLE_MASK               = BOXFLAG_WIDTH_STABLE | BOXFLAG_HEIGHT_STABLE;
-const unsigned BOXFLAG_DEPENDS_MASK_WIDTH        = BOXFLAG_WIDTH_DEPENDS_ON_CHILDREN | BOXFLAG_WIDTH_DEPENDS_ON_PARENT;
-const unsigned BOXFLAG_DEPENDS_MASK_HEIGHT       = BOXFLAG_HEIGHT_DEPENDS_ON_CHILDREN | BOXFLAG_HEIGHT_DEPENDS_ON_PARENT;
-const unsigned BOXFLAG_DEPENDS_ON_PARENT_MASK    = BOXFLAG_WIDTH_DEPENDS_ON_PARENT | BOXFLAG_HEIGHT_DEPENDS_ON_PARENT;
-const unsigned BOXFLAG_DEPENDS_ON_CHILDREN_MASK  = BOXFLAG_WIDTH_DEPENDS_ON_CHILDREN | BOXFLAG_HEIGHT_DEPENDS_ON_CHILDREN;
 const unsigned BOXFLAG_SET_BY_PARENT_MASK        = BOXFLAG_WIDTH_SET_BY_PARENT | BOXFLAG_HEIGHT_SET_BY_PARENT;
 const unsigned BOXFLAG_LAYOUT_MASK               = BOXFLAG_STABLE_MASK | BOXFLAG_TREE_SIZE_STABLE | 
                                                    BOXFLAG_BOUNDS_DEFINED | BOXFLAG_CHILD_BOUNDS_VALID | 
@@ -61,9 +69,9 @@ const unsigned BOXFLAG_CLIP_X  = BOXFLAG_CLIP_LEFT | BOXFLAG_CLIP_RIGHT;
 const unsigned BOXFLAG_CLIP_Y  = BOXFLAG_CLIP_TOP | BOXFLAG_CLIP_BOTTOM;
 const unsigned BOXFLAG_CLIP_ALL= BOXFLAG_CLIP_X | BOXFLAG_CLIP_Y;
 
-/* Whether a provisional size is being set by the box's parent, from the sum
- * of its children, or is an ideal size. */
-enum ProvisionalSizeSource { PSS_ABOVE, PSS_BELOW, PSS_IDEAL };
+enum GrowthDirection { GDIR_GROW, GDIR_SHRINK };
+
+enum SizingPass { PASS_PRE_TEXT_LAYOUT, PASS_POST_TEXT_LAYOUT };
 
 struct Box {
 	struct Node *owner;
@@ -76,8 +84,7 @@ struct Box {
 	Box *owner_next;
 
 	float ideal[2];
-	float size[2];
-	float size_from_parent[2];
+	float sizes[2][2];
 	float pos[2];
 	float pad_lower[2];
 	float pad_upper[2];
@@ -86,6 +93,7 @@ struct Box {
 	float min[2];
 	float max[2];
 	float clip[4];
+	float growth[2];
 	unsigned char axis        : 1;
 	unsigned char arrangement : 2;
 	unsigned char alignment   : 2;
@@ -97,6 +105,7 @@ struct Box {
 	unsigned char mode_pad_upper[2];
 	unsigned char mode_margin_lower[2];
 	unsigned char mode_margin_upper[2];
+	unsigned char mode_growth[2];
 
 	uint32_t flags;
 	uint32_t size_stamp[2];
@@ -105,6 +114,7 @@ struct Box {
 	uint32_t token_end;
 	uint16_t depth_interval;
 	uint16_t depth;
+	uint8_t pass_flags[2];
 	
 	unsigned cell_code;
 	Box *cell_prev;
@@ -163,12 +173,11 @@ void remove_from_parent(Document *document, Box *box);
 void append_child(Document *document, Box *parent, Box *child);
 void remove_all_children(Document *document, Box *parent);
 
+float get_size(const Box *box, Axis axis);
+float get_size_directional(const Box *box, Axis axis, bool from_parent);
 void set_ideal_size(Document *document, Box *box, Axis axis, 
 	DimensionMode mode, float dim = 0.0f);
-bool set_provisional_size(Document *document, Box *box, Axis axis, 
-	float dim, ProvisionalSizeSource source = PSS_BELOW,
-	bool mark_unstable = true, bool post_text_layout = false);
-bool compute_box_sizes(Document *document, Box *box, bool post_text_layout);
+bool compute_box_sizes(Document *document, SizingPass pass, Box *box);
 void compute_box_bounds(Document *document, Box *box, bool parent_valid = true);
 void clear_box_tree_flags(Document *document, Box *box, unsigned mask);
 void update_box_clip(Document *document, Box *box, 

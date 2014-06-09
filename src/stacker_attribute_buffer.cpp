@@ -83,6 +83,9 @@ AttributeSemantic attribute_semantic(int name)
 		case TOKEN_BACKGROUND_OFFSET_X:
 		case TOKEN_BACKGROUND_OFFSET_Y:
 			return ASEM_DIMENSON;
+		case TOKEN_GROW:
+		case TOKEN_SHRINK:
+			return ASEM_GROWTH_FACTOR;
 		case TOKEN_PADDING:
 		case TOKEN_PADDING_LEFT:
 		case TOKEN_PADDING_RIGHT:
@@ -158,6 +161,7 @@ static unsigned storage_mask(AttributeSemantic semantic, int mode)
 	switch (semantic) {
 		case ASEM_DIMENSON:
 		case ASEM_ABSOLUTE_DIMENSION:
+		case ASEM_GROWTH_FACTOR:
 			return STORAGE_BIT_NUMERIC;
 		case ASEM_REAL:
 			return STORAGE_BIT_FLOAT32;
@@ -508,6 +512,10 @@ static int validate_integer(int name, ValueSemantic vs, int value,
 			else if (vs == VSEM_NONE)
 				mode = DMODE_ABSOLUTE;
 			break;
+		case ASEM_GROWTH_FACTOR:
+			if (vs == VSEM_NONE)
+				mode = value < 0 ? STKR_OUT_OF_BOUNDS : ADEF_DEFINED;
+			break;
 		case ASEM_COLOR:
 			if (vs == VSEM_COLOR || vs == VSEM_NONE)
 				mode = ADEF_DEFINED;
@@ -744,6 +752,13 @@ static int validate_float(int name, ValueSemantic vs, float value,
 		case ASEM_ABSOLUTE_DIMENSION:
 			if (vs == VSEM_NONE)
 				mode = DMODE_ABSOLUTE;
+			break;
+		case ASEM_GROWTH_FACTOR:
+			if (vs == VSEM_NONE) {
+				mode = ADEF_DEFINED;
+				if (value < 0.0f)
+					mode = STKR_OUT_OF_BOUNDS;
+			}
 			break;
 	}
 	if (mode < 0)

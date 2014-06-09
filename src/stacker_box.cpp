@@ -18,6 +18,12 @@
 
 namespace stkr {
 
+static void update_layout_info(Document *document, Box *box);
+static void initialize_provisional_size(Document *document, Box *box, 
+	Axis axis, float dim);
+static bool set_provisional_size(Document *document, SizingPass pass, Box *box, 
+	Axis axis, float dim, bool preorder, bool from_parent);
+
 /* Converts an ASEM_EDGES value into the corresponding mask of BOXFLAG clipping 
  * bits. */
 unsigned edge_set_to_box_clip_flags(unsigned edges)
@@ -39,14 +45,27 @@ void clear_flag_in_parents(Document *document, Box *box, unsigned mask)
 	}
 }
 
+/* Returns the current size of a box on the specified axis. */
+float get_size(const Box *box, Axis axis)
+{
+	unsigned active = (box->flags >> axis) / BOXFLAG_WIDTH_SET_BY_PARENT;
+	return box->sizes[active & 1][axis];
+}
+
+/* Returns most recent size set from above or below. */
+float get_size_directional(const Box *box, Axis axis, bool from_parent)
+{
+	return box->sizes[from_parent][axis];
+}
+
 float padded_dim(const Box *box, Axis axis)
 {
-	return box->size[axis] + padding(box, axis);
+	return get_size(box, axis) + padding(box, axis);
 }
 
 float outer_dim(const Box *box, Axis axis)
 {
-	return box->size[axis] + padding_and_margins(box, axis);
+	return get_size(box, axis) + padding_and_margins(box, axis);
 }
 
 float content_edge_lower(const Box *box, Axis axis)
@@ -56,7 +75,7 @@ float content_edge_lower(const Box *box, Axis axis)
 
 float content_edge_upper(const Box *box, Axis axis)
 {
-	return content_edge_lower(box, axis) + box->size[axis];
+	return content_edge_lower(box, axis) + get_size(box, axis);
 }
 
 float padding_edge_lower(const Box *box, Axis axis)
@@ -99,8 +118,8 @@ void content_rectangle(const Box *box, float *r)
 {
 	r[0] = box->pos[AXIS_H] + box->margin_lower[AXIS_H] + box->pad_lower[AXIS_H];
 	r[2] = box->pos[AXIS_V] + box->margin_lower[AXIS_V] + box->pad_lower[AXIS_V];
-	r[1] = r[0] + box->size[AXIS_H];
-	r[3] = r[2] + box->size[AXIS_V];
+	r[1] = r[0] + get_size(box, AXIS_H);
+	r[3] = r[2] + get_size(box, AXIS_V);
 }
 
 void padding_rectangle(const Box *box, float *r)
@@ -124,8 +143,8 @@ void content_rectangle(const Box *box,
 {
 	*x0 = box->pos[AXIS_H] + box->margin_lower[AXIS_H] + box->pad_lower[AXIS_H];
 	*y0 = box->pos[AXIS_V] + box->margin_lower[AXIS_V] + box->pad_lower[AXIS_V];
-	*x1 = *x0 + box->size[AXIS_H];
-	*y1 = *y0 + box->size[AXIS_V];
+	*x1 = *x0 + get_size(box, AXIS_H);
+	*y1 = *y0 + get_size(box, AXIS_V);
 }
 
 void padding_rectangle(const Box *box, 
@@ -153,6 +172,23 @@ void hit_rectangle(const Box *box,
 		outer_rectangle(box, x0, x1, y0, y1);
 	else
 		padding_rectangle(box, x0, x1, y0, y1);
+}
+
+/* True if the size of a box may change when the size of its parent changes. */
+static bool size_depends_on_parent(const Box *box)
+{
+	unsigned flags = box->pass_flags[PASS_PRE_TEXT_LAYOUT] | 
+		box->pass_flags[PASS_POST_TEXT_LAYOUT];
+	return (flags & PASSFLAG_DEPENDS_ON_PARENT_MASK) != 0;
+}
+
+/* True if the size of a box may change when the size of one of its children
+ * changes. */
+static bool size_depends_on_children(const Box *box)
+{
+	unsigned flags = box->pass_flags[PASS_PRE_TEXT_LAYOUT] | 
+		box->pass_flags[PASS_POST_TEXT_LAYOUT];
+	return (flags & PASSFLAG_DEPENDS_ON_CHILDREN_MASK) != 0;
 }
 
 /* Retrieves the content, padding or margin rectangle of a box. */
@@ -263,7 +299,7 @@ static void box_notify_child_added_or_removed(Document *document,
 	/* If the parent's size depends on the size of its children, it will
 	 * need to be recalculated. */
 	unsigned clear_in_parents = 0;
-	if ((parent->flags & BOXFLAG_DEPENDS_ON_CHILDREN_MASK) != 0) {
+	if (size_depends_on_children(parent)) {
 		parent->flags &= ~BOXFLAG_STABLE_MASK;
 		clear_in_parents |= BOXFLAG_TREE_SIZE_STABLE;
 	}
@@ -317,10 +353,12 @@ static void remove_children_from_grid(Document *document, Box *box)
  * changed. Does not change parent flags. */
 static void box_notify_new_parent(Document *document, Box *child, Box *parent)
 {
+	/* Dependency bits depend on the parent for some kinds of boxes. */
+	update_layout_info(document, child);
 	/* If the child's size is a function of its parent's, it will need to be
 	 * recalculated. */
 	unsigned clear_in_parents = 0;
-	if ((child->flags & BOXFLAG_DEPENDS_ON_PARENT_MASK) != 0) {
+	if (size_depends_on_parent(child)) {
 		child->flags &= ~BOXFLAG_STABLE_MASK;
 		clear_in_parents |= BOXFLAG_TREE_SIZE_STABLE;
 	}
@@ -334,76 +372,34 @@ static void box_notify_new_parent(Document *document, Box *child, Box *parent)
 		remove_children_from_grid(document, child);
 }
 
-
-/* True if a box's size on the specified axis has been computed at least once
- * in this layout tick, or is fixed and therefore always valid. */
-static bool has_provisional_size(const Document *document, const Box *box, Axis axis)
+/* True if two dimensions should be considered equal for the purposes of change
+ * detection. */
+inline bool sizes_equal(float a, float b)
 {
-	return ((box->flags & (BOXFLAG_DEPENDS_MASK_WIDTH << axis)) == 0) ||
-		(box->size_stamp[axis] == get_layout_clock(document));
+	return fabsf(a - b) < 0.5f;
 }
 
-/* Like has_provisional_size(), but also marks the box for a visit if its size
- * is unavailable. */
-static bool require_provisional_size(Document *document, Box *box, Axis axis)
+/* Sets a box's size on the specified axis and updates the box's flags to
+ * indicate that a size is defined and that it came from either the parent or 
+ * the child. */
+static void set_size(const Document *document, Box *box, Axis axis, 
+	bool from_parent, float dim)
 {
-	if (has_provisional_size(document, box, axis))
-		return true;
-	unsigned stable_flag = BOXFLAG_WIDTH_STABLE << axis;
-	box->flags &= ~(stable_flag | BOXFLAG_TREE_SIZE_STABLE);
-	clear_flag_in_parents(document, box, BOXFLAG_TREE_SIZE_STABLE);
-	lmsg("\t%s of %s required for calculation of size of parent %s, but "
-		"not defined. Marked unstable.\n", 
-		((axis == AXIS_H) ? "Width" : "Height"), get_box_debug_string(box), 
-		get_box_debug_string(box->parent));
-	return false;
+	box->sizes[from_parent][axis] = dim;
+	if ((box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0) {
+		/* The first time a size is defined, it is copied into both parent and 
+		 * child slots to simplify change detection. */
+		box->flags |= BOXFLAG_WIDTH_DEFINED << axis;
+		box->sizes[from_parent ^ 1][axis] = dim;
+	}
+	box->flags = set_or_clear(box->flags, 
+		BOXFLAG_WIDTH_SET_BY_PARENT << axis, from_parent);
+	box->size_stamp[axis] = document->layout_clock;
 }
 
-/* True if 'box' is the main box of an inline context node. */
-static bool is_inline_container_box(const Box *box)
+/* Applies a box's size limits to 'dim'. */
+static float apply_min_max(const Box *box, Axis axis, float dim)
 {
-	return box->owner != NULL && box == get_box(box->owner) && 
-		get_layout(box->owner) == LAYOUT_INLINE_CONTAINER;
-}
-
-/* Can the size of a box be set from above? It can if the dimension is not 
- * absolute, and has either not yet been set this tick, or has only been set by
- * the parent. */
-static bool may_set_size_from_parent(const Document *document, 
-	const Box *box, Axis axis, bool post_text_layout)
-{
-	return (box->flags & (BOXFLAG_WIDTH_DEPENDS_ON_PARENT << axis)) != 0 &&
-		((box->size_stamp[axis] != get_layout_clock(document)) || 
-		(box->flags & (BOXFLAG_WIDTH_SET_BY_PARENT << axis)) != 0) &&
-		!(post_text_layout && is_inline_container_box(box));
-}
-
-/* Can the size of a box be set from below? */
-static bool may_set_size_from_children(const Document *document, 
-	const Box *box, Axis axis, bool post_text_layout)
-{
-	document; post_text_layout;
-	return (box->flags & (BOXFLAG_WIDTH_DEPENDS_ON_CHILDREN << axis)) != 0;
-}
-
-/* Sets the provisional width or height of a box, updating flags accordingly. 
- * Returns true if the new constrained dimension is different from the old 
- * one. */
-bool set_provisional_size(Document *document, Box *box, Axis axis, 
-	float dim, ProvisionalSizeSource source, bool mark_unstable, 
-	bool post_text_layout)
-{
-	assertb(source != PSS_ABOVE || may_set_size_from_parent(document, box, 
-		axis, post_text_layout));
-
-	/* Set dependency flags according to the new mode. */
-	unsigned depends_on_children_flag = BOXFLAG_WIDTH_DEPENDS_ON_CHILDREN  << axis;
-	unsigned set_by_parent_flag       = BOXFLAG_WIDTH_SET_BY_PARENT        << axis;
-	unsigned defined_flag             = BOXFLAG_WIDTH_DEFINED              << axis;
-	unsigned defined_parent_flag      = BOXFLAG_WIDTH_FROM_PARENT_DEFINED  << axis;
-	unsigned stable_flag              = BOXFLAG_WIDTH_STABLE               << axis;
-
-	/* Apply the min and max constraints if they are set. */
 	DimensionMode mode_min = (DimensionMode)box->mode_min[axis];
 	DimensionMode mode_max = (DimensionMode)box->mode_max[axis];
 	if (mode_min != ADEF_UNDEFINED) {
@@ -414,93 +410,261 @@ bool set_provisional_size(Document *document, Box *box, Axis axis,
 		assertb(mode_max == DMODE_ABSOLUTE);
 		dim = std::min(dim, box->max[axis]);
 	}
+	return dim;
+}
+
+/* True if 'box' is the main box of an inline context node. */
+static bool is_inline_container_box(const Box *box)
+{
+	return box->owner != NULL && box == get_box(box->owner) && 
+		get_layout(box->owner) == LAYOUT_INLINE_CONTAINER;
+}
+
+/* True if a box will be subject to grow-shrink adjustment along its parent's
+ * major axis. */
+static bool may_grow_or_shrink(const Box *box)
+{
+	return box->growth[GDIR_GROW] != 0.0f || box->growth[GDIR_SHRINK] != 0.0f;
+}
+
+/* Marks a box to be visited in the next layout iteration. */
+static void must_visit(Document *document, Box *box, Axis axis)
+{
+	document;
+	unsigned mask = (BOXFLAG_WIDTH_STABLE << axis) | BOXFLAG_TREE_SIZE_STABLE;
+	do {
+		box->flags &= ~mask;
+		box = box->parent;
+	} while (box != NULL);
+}
+
+/* Tells a child box how much space it should use to set text. */
+static void advise_text_layout_width(Document *document, Box *box, float width)
+{
+	if (!is_inline_container_box(box))
+		return;
+	set_provisional_size(document, PASS_PRE_TEXT_LAYOUT, box, AXIS_H, width, 
+		true, true);
+	box->flags &= ~BOXFLAG_PARAGRAPH_VALID;
+}
+
+/* True if a box's sizing gate is open. This means that it's OK to propagate a 
+ * size from above or below to an axis of the box, given a direction of 
+ * transmission, a traversal order and pass. */
+inline bool gate_open(SizingPass pass, const Box *box, Axis axis, 
+	bool preorder, bool from_parent)
+{
+	unsigned axis_flags = unsigned(box->pass_flags[pass]) >> axis;
+	unsigned set_by_parent = box->flags / BOXFLAG_WIDTH_SET_BY_PARENT;
+	unsigned depends = (axis_flags / PASSFLAG_WIDTH_DEPENDS_ON_PARENT) >> (2 * (from_parent ^ 1));
+	unsigned order_filter = (axis_flags / PASSFLAG_WIDTH_PREORDER) >> (2 * (preorder ^ 1));
+	unsigned set_by_opposite = set_by_parent ^ unsigned(from_parent);
+	unsigned first_half_of_cycle = preorder ^ from_parent ^ 1;
+	unsigned direction_filter = set_by_opposite | first_half_of_cycle;
+	return bool(depends & order_filter & direction_filter & 1);
+}
+
+/* Determines whether a box has dimensions that cannot by changed by layout,
+ * and initializes the permanent provisional size of any such dimensions. */
+static void update_fixed_dimensions(Document *document, Box *box)
+{
+	box->flags &= ~(BOXFLAG_WIDTH_FIXED | BOXFLAG_HEIGHT_FIXED);
+	bool flexible = box->parent != NULL && may_grow_or_shrink(box);
+	for (unsigned axis = 0; axis < 2; ++axis) {
+		if (box->mode_dim[axis] == DMODE_ABSOLUTE && 
+			(!flexible || axis != box->parent->axis)) {
+			box->flags |= BOXFLAG_WIDTH_FIXED << axis;
+			initialize_provisional_size(document, box, (Axis)axis, 
+				box->ideal[axis]);
+		}
+	}
+}
+
+/* Sets flags that say whether each dimension of a box depends on the parent
+ * dimension, the dimensions of children, or both, and in which direction the
+ * constraints are imposed. */
+static void update_dependency_flags(Document *document, Box *box)
+{
+	document;
+	/* By default, a box shrinks to fit its children. */
+	unsigned pass0 = PASSFLAG_ORDER_MASK | PASSFLAG_DEPENDS_ON_CHILDREN_MASK;
+	unsigned pass1_diff = 0;
+	for (unsigned axis = 0; axis < 2; ++axis) {
+		DimensionMode dmode = (DimensionMode)box->mode_dim[axis];
+		if ((box->flags & (BOXFLAG_WIDTH_FIXED << axis)) != 0) {
+			/* The box is independent of its parent and its children on this
+			 * axis. */
+			pass0 &= ~((PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN | 
+				PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN) << axis);
+		} else if (dmode == DMODE_ABSOLUTE || dmode == DMODE_FRACTIONAL) {
+			/* The box either has a fractional dimension, or has an absolute 
+			 * dimension but is flexible. Either way, the size of the box in 
+			 * this axis is a function solely of its parent size in the same 
+			 * axis. */
+			pass0 |= (PASSFLAG_WIDTH_DEPENDS_ON_PARENT << axis);
+			pass0 &= ~(PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN << axis);
+		} else if (box->parent != NULL && (box->growth[0] != 0.0f || 
+			box->growth[1] != 0.0f)) {
+			/* Boxes with a nonzero grow or shrink depend on both their children
+			 * and their parent along the flex axis, with constraints imposed 
+			 * in child-then-parent order. */
+			Axis growth_axis = (Axis)box->parent->axis;
+			pass0 |= (PASSFLAG_WIDTH_DEPENDS_ON_PARENT << growth_axis);
+			pass0 &= ~(PASSFLAG_WIDTH_PREORDER << axis);
+		} else if (is_inline_container_box(box)) {
+			/* A shrink-fit inline container. These are special in two ways.
+			 * Firstly, their contents, the text boxes, are invalid and should
+			 * be ignored in the pre-text-layout pass, so we size from children
+			 * only in post-text-layout. Secondly, an inline container needs to
+			 * be told by its parent how wide to set the text. We have special
+			 * cases in the propagate-down code to do this, but for its part
+			 * the inline container must declare a dependency on its parent 
+			 * during pre-text-layout to ensure this information is 
+			 * transferred. */
+			pass0 &= ~(PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN << axis);
+			pass1_diff |= (PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN << axis);
+			if (axis == AXIS_H) {
+				pass0 |= (PASSFLAG_WIDTH_DEPENDS_ON_PARENT << axis);
+				pass1_diff |= (PASSFLAG_WIDTH_DEPENDS_ON_PARENT << axis);
+			}
+		}
+	}
+	
+	/* The preorder and postorder bits can only be set if the corresponding
+	 * depends-on bit is set. */
+	unsigned pass1 = pass0 ^ pass1_diff;
+	pass0 &= ~PASSFLAG_ORDER_MASK | (pass0 << 4);
+	pass1 &= ~PASSFLAG_ORDER_MASK | (pass1 << 4);
+	box->pass_flags[PASS_PRE_TEXT_LAYOUT] = (uint8_t)pass0;
+	box->pass_flags[PASS_POST_TEXT_LAYOUT] = (uint8_t)pass1;
+}
+
+/* Precalculates information used by layout after a box's properties have 
+ * changed or it has been moved in the tree. */
+static void update_layout_info(Document *document, Box *box)
+{
+	update_fixed_dimensions(document, box);
+	update_dependency_flags(document, box);
+}
+
+/* True if a box's size on the specified axis has been computed at least once
+ * in this layout tick, or is fixed and therefore always valid. */
+static bool has_provisional_size(const Document *document, const Box *box, Axis axis)
+{
+	return ((box->flags & (BOXFLAG_WIDTH_FIXED << axis)) != 0) ||
+		(box->size_stamp[axis] == document->layout_clock);
+}
+
+/* Sets a box's initial provisional size without performing any change 
+ * detection. */
+static void initialize_provisional_size(Document *document, Box *box, 
+	Axis axis, float dim)
+{
+	dim = apply_min_max(box, axis, dim);
+	set_size(document, box, axis, false, dim);
+	must_visit(document, box, axis);
+}
+
+/* Like has_provisional_size(), but also marks the box for a visit if its size
+ * is unavailable. */
+static bool require_provisional_size(Document *document, SizingPass pass, 
+	Box *box, Axis axis)
+{
+	pass;
+	/* Has a size already been set this layout? */
+	if (box->size_stamp[axis] == document->layout_clock)
+		return true;
+	/* Fixed sizes are permanently defined and need not be initialized. */
+	if ((box->flags & (BOXFLAG_WIDTH_FIXED << axis)) != 0)
+		return true;
+	/* If the box defines an absolute size on this axis, use it to initialize
+	 * the provisional size. */
+	if (box->mode_dim[axis] == DMODE_ABSOLUTE) {
+		initialize_provisional_size(document, box, axis, box->ideal[axis]);
+		return true;
+	}
+	/* We need to visit the box to calculate its provisional size. */
+	unsigned stable_flag = BOXFLAG_WIDTH_STABLE << axis;
+	box->flags &= ~(stable_flag | BOXFLAG_TREE_SIZE_STABLE);
+	clear_flag_in_parents(document, box, BOXFLAG_TREE_SIZE_STABLE);
+	lmsg("\t%s of %s required for calculation of size of parent %s, but "
+		"not defined. Marked unstable.\n", 
+		((axis == AXIS_H) ? "Width" : "Height"), 
+		get_box_debug_string(box), 
+		get_box_debug_string(box->parent));
+	return false;
+}
+
+
+/* Sets the provisional width or height of a box, updating flags accordingly. 
+ * Returns true if the new constrained dimension is different from the old 
+ * one. */
+bool set_provisional_size(Document *document, SizingPass pass, Box *box, 
+	Axis axis, float dim, bool preorder, bool from_parent)
+{
+	assertb(gate_open(pass, box, axis, preorder, from_parent));
+
+	unsigned depends_on_children_flag = PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN  << axis;
+	unsigned defined_flag             = BOXFLAG_WIDTH_DEFINED               << axis;
+	unsigned stable_flag              = BOXFLAG_WIDTH_STABLE                << axis;
 
 	/* Is the constrained dimension different from the one stored? */
-	bool updated = !has_provisional_size(document, box, axis);
+	dim = apply_min_max(box, axis, dim);
+	float old_size = box->sizes[from_parent][axis];
+	bool first = !has_provisional_size(document, box, axis);
 	bool changed = (box->flags & defined_flag) == 0 || 
-		fabsf(dim - box->size[axis]) >= 0.5f;
-	bool from_parent_changed = (source != PSS_BELOW) && 
-		((box->flags & defined_parent_flag) == 0 || 
-		fabsf(dim - box->size_from_parent[axis]) >= 0.5f);
+		!sizes_equal(dim, old_size);
 
-	/* The dimension is now provisionally defined. */
-	box->flags |= defined_flag;
-	box->size_stamp[axis] = get_layout_clock(document);
-
-	/* The set-by-parent flag says whether the main provisional dimension came
-	 * from above or below. Dimensions calculated from below cannot be
-  	 * overwritten by those from above. This rule exists to resolve cyclic 
- 	 * dependencies.*/
-	box->flags = set_or_clear(box->flags, set_by_parent_flag, 
-		(source == PSS_ABOVE));
-
-	/* The size_from_parent fields are copies of the main size that are only
-	 * updated when set_by_parent is true. They have separate "defined" flags
-	 * but share the other flags with the main size. */
-	if (from_parent_changed) {
-		box->flags |= defined_parent_flag;
-		box->size_from_parent[axis] = dim;
-		/* size_from_parent[AXIS_H] is the basis for text layout. */
-		if (axis == AXIS_H)
-			box->flags &= ~BOXFLAG_PARAGRAPH_VALID;
-	}
+	/* Store the new size. Note that 'changed' means the new size is the same as
+	 * one most recently set in the same direction, not necessarily that it's
+	 * the same as the active size, so we have to do this even if 'changed' is
+	 * false. */
+	set_size(document, box, axis, from_parent, dim);
 
 	/* If the dimension was already defined to the same value this tick, the
 	 * box remains stable. */
-	if (!(updated || changed))
+	if (!(first || changed))
 		return false;
 
 	/* If the parent box calculates its size from its children, it must
-	 * revisited, regardless of whether the dimension has actually change or
+	 * revisited, regardless of whether the dimension has actually changed or
 	 * we have just defined it for the first time this tick. */
 	unsigned clear_in_parents = 0;
-	if (box->parent != NULL) {
-		if ((box->parent->flags & depends_on_children_flag) != 0) {
-			box->parent->flags &= ~stable_flag;
-			clear_in_parents |= BOXFLAG_TREE_SIZE_STABLE;
-		}
+	if (box->parent != NULL && (box->parent->pass_flags[pass] & 
+		depends_on_children_flag) != 0) {
+		box->parent->flags &= ~stable_flag;
+		clear_in_parents |= BOXFLAG_TREE_SIZE_STABLE;
 	}
 
 	if (changed) {
-		/* The box should be revisited to propagate the new size to its 
-		 * children. However, if this size update is being done during an
-		 * axis update for the box, the new size will be immediately propagated
-		 * to the box's children. In this situation 'mark_unstable' is passed 
-		 * as false. */
-		if (mark_unstable) {
-			box->flags &= ~(stable_flag | BOXFLAG_TREE_SIZE_STABLE);
-			clear_in_parents |= BOXFLAG_TREE_SIZE_STABLE;
-		}
-
+		/* The size really changed. Revisit the box next pass to propagate it. */
+		box->flags &= ~(stable_flag | BOXFLAG_TREE_SIZE_STABLE);
+		clear_in_parents |= BOXFLAG_TREE_SIZE_STABLE;
 		/* Our size change may move our siblings. */
 		if (box->parent != NULL) {
 			box->parent->flags &= ~BOXFLAG_CHILD_BOUNDS_VALID;
 			clear_in_parents |= BOXFLAG_TREE_BOUNDS_VALID;
 		}
-
 		/* If this is the main box of a node, set the appropriate size-changed 
 		 * flag on the node, and expansion flags in the node's parent chain. */
 		if (box->owner != NULL && box->owner->box == box) {
 			box->owner->flags |= (NFLAG_WIDTH_CHANGED << axis);
 			propagate_expansion_flags(box->owner, 1 << axis);
 		}
-
 		/* The box's clip rectangle and the clip rectangles of all its children
 		 * must be recalculated. */
 		box->flags &= ~BOXFLAG_TREE_CLIP_VALID;
 		clear_in_parents |= BOXFLAG_TREE_CLIP_VALID;
+		/* Changing the width of an inline container invalidates its paragraph
+		 * layout. */
+		if (pass == PASS_PRE_TEXT_LAYOUT && is_inline_container_box(box))
+			box->flags &= ~BOXFLAG_PARAGRAPH_VALID;
 
-		/* Log a helpful message. */
-		const char *source_name = (source == PSS_ABOVE) ? "parent" : 
-			(source == PSS_BELOW ? "child" : "init");
-		lmsg("\t%s of %s changed from %.2f to %.2f by %s.\n", 
-			(axis == AXIS_H ? "Width" : "Height"), 
-			get_box_debug_string(box), box->size[axis], dim, source_name);
-
-		/* Store the new size. */
-		box->size[axis] = dim;
+		lmsg("\tsize change: pass: %d box: %s axis: %s, from_parent: %d, "
+			"preorder: %d old: %2.f new: %.2f",
+			pass, get_box_debug_string(box), axis, from_parent, 
+			preorder, old_size, get_size(box, axis));
 	}
-
 	if (clear_in_parents != 0)
 		clear_flag_in_parents(document, box, clear_in_parents);
 
@@ -513,35 +677,15 @@ bool set_provisional_size(Document *document, Box *box, Axis axis,
 void set_ideal_size(Document *document, Box *box, Axis axis, 
 	DimensionMode mode, float dim)
 {
-	/* Set dependency flags according to the new mode. */
-	unsigned depends_on_parent_flag   = BOXFLAG_WIDTH_DEPENDS_ON_PARENT   << axis;
-	unsigned depends_on_children_flag = BOXFLAG_WIDTH_DEPENDS_ON_CHILDREN << axis;
-	unsigned defined_flag             = BOXFLAG_WIDTH_DEFINED             << axis;
-	unsigned defined_parent_flag      = BOXFLAG_WIDTH_FROM_PARENT_DEFINED << axis;
-	if (mode <= DMODE_AUTO) {
-		box->flags |= depends_on_parent_flag | depends_on_children_flag;
-	} else {
-		box->flags &= ~(depends_on_children_flag | depends_on_parent_flag);
-		if (mode == DMODE_FRACTIONAL)
-			box->flags |= depends_on_parent_flag;
-	}
-
 	/* Are the size or mode really being changed? */
-	if (mode == box->mode_dim[axis] && box->ideal[axis] == dim) {
-		lmsg("Ideal size of %s unchanged at %.2f.\n", get_box_debug_string(box), dim);
+	if (mode == box->mode_dim[axis] && sizes_equal(box->ideal[axis], dim)) {
+		lmsg("Ideal size of %s unchanged at %.2f.\n", 
+			get_box_debug_string(box), dim);
 		return;
 	}
-
 	box->mode_dim[axis] = (unsigned char)mode;
 	box->ideal[axis] = dim;
-
-	/* Setting the ideal size invalidates the provisional size. */
-	box->flags &= ~(defined_flag | defined_parent_flag);
-
-	/* Absolute dimensions have a permanent provisional size which we initialize
-	 * when setting the ideal size. */
-	if (mode == DMODE_ABSOLUTE)
-		set_provisional_size(document, box, axis, dim, PSS_IDEAL);
+	box->flags &= ~(BOXFLAG_WIDTH_DEFINED << axis);
 }
 
 void remove_from_parent(Document *document, Box *box)
@@ -600,12 +744,12 @@ Box *create_box(Document *document, Node *owner)
 	}
 
 	box->owner = owner;
+	box->owner_next = NULL;
 	box->parent = NULL;
 	box->first_child = NULL;
 	box->last_child = NULL;
 	box->next_sibling = NULL;
 	box->prev_sibling = NULL;
-	box->owner_next = NULL;
 	box->layers = NULL;
 	box->flags = 0;
 	box->mouse_hit_stamp = uint32_t(-1);
@@ -616,6 +760,7 @@ Box *create_box(Document *document, Node *owner)
 	box->cell_code = INVALID_CELL_CODE;
 	box->cell_prev = NULL;
 	box->cell_next = NULL;
+
 	return box;
 }
 
@@ -645,8 +790,6 @@ void set_box_debug_string(Box *box, const char *fmt, ...)
 
 static void initialize_dimensions(Document *document, Box *box)
 {
-	set_ideal_size(document, box, AXIS_H, (DimensionMode)ADEF_UNDEFINED, 0.0f);
-	set_ideal_size(document, box, AXIS_V, (DimensionMode)ADEF_UNDEFINED, 0.0f);
 	box->mode_min[AXIS_H] = ADEF_UNDEFINED;
 	box->mode_min[AXIS_V] = ADEF_UNDEFINED;
 	box->mode_max[AXIS_H] = ADEF_UNDEFINED;
@@ -667,6 +810,8 @@ static void initialize_dimensions(Document *document, Box *box)
 	box->margin_lower[AXIS_V] = 0.0f;
 	box->margin_upper[AXIS_H] = 0.0f;
 	box->margin_upper[AXIS_V] = 0.0f;
+	set_ideal_size(document, box, AXIS_H, (DimensionMode)ADEF_UNDEFINED, 0.0f);
+	set_ideal_size(document, box, AXIS_V, (DimensionMode)ADEF_UNDEFINED, 0.0f);
 }
 
 void destroy_box(Document *document, Box *box, bool destroy_children)
@@ -711,12 +856,6 @@ void configure_container_box(Document *document, Node *node, Axis axis, Box *box
 {
 	box->axis = axis;
 	
-	float ideal_width, ideal_height;
-	DimensionMode mode_width  = (DimensionMode)read_as_float(node, TOKEN_WIDTH, &ideal_width, 0.0f);
-	DimensionMode mode_height = (DimensionMode)read_as_float(node, TOKEN_HEIGHT, &ideal_height, 0.0f);
-	set_ideal_size(document, box, AXIS_H, mode_width, ideal_width);
-	set_ideal_size(document, box, AXIS_V, mode_height, ideal_height);
-
 	box->mode_min[AXIS_H]          = (unsigned char)read_as_float(node, TOKEN_MIN_WIDTH, &box->min[AXIS_H], 0.0f);
 	box->mode_min[AXIS_V]          = (unsigned char)read_as_float(node, TOKEN_MIN_HEIGHT, &box->min[AXIS_V], 0.0f);
 	box->mode_max[AXIS_H]          = (unsigned char)read_as_float(node, TOKEN_MAX_WIDTH, &box->max[AXIS_H], 0.0);
@@ -729,6 +868,8 @@ void configure_container_box(Document *document, Node *node, Axis axis, Box *box
 	box->mode_margin_upper[AXIS_H] = (unsigned char)read_as_float(node, TOKEN_MARGIN_RIGHT, &box->margin_upper[AXIS_H]);
 	box->mode_margin_lower[AXIS_V] = (unsigned char)read_as_float(node, TOKEN_MARGIN_TOP, &box->margin_lower[AXIS_V]);
 	box->mode_margin_upper[AXIS_V] = (unsigned char)read_as_float(node, TOKEN_MARGIN_BOTTOM, &box->margin_upper[AXIS_V]);
+	box->mode_growth[GDIR_GROW]    = (unsigned char)read_as_float(node, TOKEN_GROW, &box->growth[GDIR_GROW], 0.0f);
+	box->mode_growth[GDIR_SHRINK]  = (unsigned char)read_as_float(node, TOKEN_SHRINK, &box->growth[GDIR_SHRINK], 0.0f);
 
 	box->arrangement = read_mode(node, TOKEN_ARRANGE, ALIGN_START);
 	box->alignment = read_mode(node, TOKEN_ALIGN, ALIGN_START);
@@ -737,16 +878,16 @@ void configure_container_box(Document *document, Node *node, Axis axis, Box *box
 	unsigned clip_edges = read_mode(node, TOKEN_CLIP, EDGE_FLAG_ALL);
 	box->flags |= edge_set_to_box_clip_flags(clip_edges);
 
-	/* Inline container boxes expand to fit the width of their container
-	 * unless otherwise specified. */
-	if (node->layout == LAYOUT_INLINE_CONTAINER && 
-		box->mode_dim[AXIS_H] == ADEF_UNDEFINED) {
-		box->mode_dim[AXIS_H] = DMODE_FRACTIONAL;
-		box->ideal[AXIS_H] = 1.0f;
-	}
+	float ideal_width, ideal_height;
+	DimensionMode mode_width  = (DimensionMode)read_as_float(node, TOKEN_WIDTH, &ideal_width, 0.0f);
+	DimensionMode mode_height = (DimensionMode)read_as_float(node, TOKEN_HEIGHT, &ideal_height, 0.0f);
+	set_ideal_size(document, box, AXIS_H, mode_width, ideal_width);
+	set_ideal_size(document, box, AXIS_V, mode_height, ideal_height);
 
 	set_box_dimensions_from_image(document, node, box);
 	node->flags |= NFLAG_UPDATE_SELECTION_LAYERS | NFLAG_UPDATE_BOX_LAYERS;
+
+	update_layout_info(document, box);
 }
 
 Box *build_line_box(Document *document, Node *node, 
@@ -770,6 +911,7 @@ Box *build_line_box(Document *document, Node *node,
 			box->alignment = ALIGN_START;
 			break;
 	}
+	update_layout_info(document, box);
 	return box;
 }
 
@@ -783,6 +925,7 @@ Box *build_text_box(Document *document, Node *owner,
 	box->alignment = ALIGN_MIDDLE;
 	box->flags |= BOXFLAG_SELECTION_ANCHOR | BOXFLAG_HIT_OUTER | BOXFLAG_NO_LABEL;
 	set_box_debug_string(box, "subword \"%.*s\"", text_length, text);
+	update_layout_info(document, box);
 	return box;
 }
 
@@ -795,8 +938,8 @@ static bool set_box_position(Document *document, Box *box, float a, float b,
 	document;
 	Axis axis_b = Axis(axis_a ^ 1);
 	bool changed = (box->flags & BOXFLAG_BOUNDS_DEFINED) == 0 || 
-		fabsf(a - box->pos[axis_a]) >= 0.5f ||
-		fabsf(b - box->pos[axis_b]) >= 0.5f;
+		!sizes_equal(a, box->pos[axis_a]) || 
+		!sizes_equal(b, box->pos[axis_b]);
 	box->pos[axis_a] = a;
 	box->pos[axis_b] = b;
 	if (changed) {
@@ -815,102 +958,179 @@ static bool set_box_position(Document *document, Box *box, float a, float b,
 	} else if (box->cell_code == INVALID_CELL_CODE) {
 		/* The box hasn't moved, but it isn't in the grid (boxes are removed
 		 * from the grid when they are hidden or change parents). Now we know
-		 * the box's bounds, reinsert it into the grid. */
+		 * the box's bounds, reinsert the box into the grid. */
 		grid_insert(document, box);
 	}
 
 	return changed;
 }
 
-/* Visits one axis of a box, calculating its size from its children, then
- * setting the size of its children based on its own size. */
-static void update_box_axis(Document *document, Box *box, Axis axis, 
-	bool post_text_layout)
+/* Calculates the size of a box from its children. */
+static void compute_size_from_children(Document *document, SizingPass pass, 
+	Box *box, Axis axis, bool preorder)
 {
-	unsigned depends_on_parent_flag   = BOXFLAG_WIDTH_DEPENDS_ON_PARENT   << axis;
-	unsigned stable_flag              = BOXFLAG_WIDTH_STABLE              << axis;
-
-	/* Optimistically mark the box as stable. This may be cleared if we alter 
-	 * a child size. */
-	box->flags |= stable_flag;
-	
-	/* If the box's size may be determined by the sizes of its children, try to
-	 * recalculate it. */
-	if (may_set_size_from_children(document, box, axis, post_text_layout)) {
-		bool dim_defined = (box->first_child == NULL);
-		float dim = 0.0f;
-		if (axis == box->axis) {
-			/* The size of the parent is the sum of the sizes of the children. */
-			for (Box *child = box->first_child; child != NULL; 
-				child = child->next_sibling) {
-				if (require_provisional_size(document, child, axis)) {
-					dim += outer_dim(child, axis);
-					dim_defined = true;
-				}
-			}
-		} else {
-			/* The size of the largest child defines the size of the box. */
-			for (Box *child = box->first_child; child != NULL; 
-				child = child->next_sibling) {
-				if (require_provisional_size(document, child, axis)) {
-					float outer = outer_dim(child, axis);
-					dim = dim_defined ? std::max(dim, outer) : outer;
-					dim_defined = true;
-				}
-			}	
-		}
-		if (dim_defined) {
-			/* Apply this box's size constraints and store the new size. */
-			set_provisional_size(document, box, axis, dim, PSS_BELOW, false, 
-				post_text_layout);
-		}
-	}
-	
-	/* If we have a provisional size, propagate it to our children. */
-	if (has_provisional_size(document, box, axis)) {
-		/* Read the dimension to propagate. */
-		float dim = box->size[axis];
-		
-		/* Propagate the dimension to our children. */
-		for (Box *child = box->first_child; child != NULL;
+	if (!gate_open(pass, box, axis, preorder, false))
+		return;
+	bool dim_defined = (box->first_child == NULL);
+	float dim = 0.0f;
+	if (axis == box->axis) {
+		/* The size of the parent is the sum of the sizes of the children. */
+		for (Box *child = box->first_child; child != NULL; 
 			child = child->next_sibling) {
-			/* May we set this child's size? */
-			if (!may_set_size_from_parent(document, child, axis, 
-				post_text_layout))
-				continue;
-
-			/* Set the child's size according to the child's mode in this 
-			 * axis. */
-			int dmode = child->mode_dim[axis];
-			if (dmode == DMODE_FRACTIONAL) {
-				float child_dim = dim * child->ideal[axis] - 
-					padding_and_margins(child, axis);
-				set_provisional_size(document, child, axis, child_dim, 
-					PSS_ABOVE, true, post_text_layout);
-			} else if (dmode <= DMODE_AUTO && axis != box->axis && 
-				!has_provisional_size(document, child, axis)) {
-				/* Expand children with undefined dimensions to fit the minor
-				 * axis of their parent, in the absence of a shrink-fit size
-				 * from below. */
-				float child_dim = dim - padding_and_margins(child, axis);
-					child->margin_upper[axis];
-				set_provisional_size(document, child, axis, child_dim, 
-					PSS_ABOVE, true, post_text_layout);
+			if (require_provisional_size(document, pass, child, axis)) {
+				dim += outer_dim(child, axis);
+				dim_defined = true;
 			}
 		}
 	} else {
+		/* The size of the largest child defines the size of the box. */
+		for (Box *child = box->first_child; child != NULL; 
+			child = child->next_sibling) {
+			if (require_provisional_size(document, pass, child, axis)) {
+				float outer = outer_dim(child, axis);
+				dim = dim_defined ? std::max(dim, outer) : outer;
+				dim_defined = true;
+			}
+		}	
+	}
+ 	if (dim_defined)
+		set_provisional_size(document, pass, box, axis, dim, preorder, false);
+}
+
+/* Sets the sizes of any children that are a function of the parent size. This
+ * doesn't include grow-shrink sizing, which is done in its own pass. */
+static void size_dependent_children(Document *document, SizingPass pass, 
+	Box *box, Axis axis, bool preorder)
+{
+	/* Read the dimension to propagate. */
+	float dim = get_size(box, axis);
+	/* Propagate the dimension to our children. */
+	for (Box *child = box->first_child; child != NULL;
+		child = child->next_sibling) {
+		/* May we set this child's size? */
+		if (!gate_open(pass, child, axis, preorder, true))
+			continue;
+		/* Set the child's size according to the child's mode in this 
+		 * axis. */
+		int dmode = child->mode_dim[axis];
+		if (dmode == DMODE_FRACTIONAL) {
+			float child_dim = dim * child->ideal[axis] - 
+				padding_and_margins(child, axis);
+			set_provisional_size(document, pass, child, axis, child_dim, 
+				preorder, true);
+		} else if (dmode <= DMODE_AUTO) {
+			float child_dim = dim - padding_and_margins(child, axis);
+				child->margin_upper[axis];
+			advise_text_layout_width(document, child, child_dim);
+		}
+	}
+}
+
+/* Returns a box's starting size for the purposes of grow-and-shrink sizing. */
+static float basis_size(SizingPass pass, const Box *box, Axis axis)
+{
+	if ((box->pass_flags[pass] & (PASSFLAG_WIDTH_DEPENDS_ON_CHILDREN << axis)) != 0)
+		return get_size_directional(box, axis, false);
+	return get_size(box, axis);
+}
+
+/* Distributes the positive or negative free space in the major axis of a 
+ * box between the box's children in proportion to their grow or shrink 
+ * factors. */
+static void grow_and_shrink_children(Document *document, SizingPass pass, 
+	Box *box, Axis axis, bool preorder)
+{
+	/* Grow and shrink are only applied along the parent's major axis. */
+	if (axis != box->axis)
+		return;
+		
+	/* Add up the grow and shrink numbers. */
+	float dim = get_size(box, axis);
+	float total_child_size = 0.0f;
+	float scale[2] = { 0.0f, 0.0f };
+	for (Box *child = box->first_child; child != NULL; 
+		child = child->next_sibling) {
+		if (!require_provisional_size(document, pass, child, axis))
+			return;
+		total_child_size += basis_size(pass, child, axis) + 
+			padding_and_margins(child, axis);
+		scale[GDIR_SHRINK] += child->growth[GDIR_SHRINK];
+		scale[GDIR_GROW] += child->growth[GDIR_GROW];
+	}
+
+	float adjustment = dim - total_child_size;
+	GrowthDirection gdir = adjustment >= 0.0f ? GDIR_GROW : GDIR_SHRINK;
+	if (fabsf(adjustment) <= FLT_EPSILON || fabsf(scale[gdir]) <= FLT_EPSILON)
+		return;
+			 
+	adjustment /= scale[gdir];
+	for (Box *child = box->first_child; child != NULL;
+		child = child->next_sibling) {
+		if (!gate_open(pass, child, axis, preorder, true))
+			continue;
+		float adjusted = basis_size(pass, child, axis) + adjustment * 
+			child->growth[gdir];
+		set_provisional_size(document, pass, child, axis, adjusted, 
+			preorder, true);
+	}
+}
+
+
+static void adjust_child_sizes(Document *document, SizingPass pass, Box *box, 
+	Axis axis, bool preorder)
+{
+	/* If we have a provisional size, propagate it to our children. */
+	if (has_provisional_size(document, box, axis)) {
+		size_dependent_children(document, pass, box, axis, preorder);
+		grow_and_shrink_children(document, pass, box, axis, preorder);
+	} else {
 		/* This box has no provisional size. If there is a prospect of one
 		 * being supplied by its parent, mark the parent for a visit. */
-		if (box->parent != NULL && (box->flags & depends_on_parent_flag) != 0) {
-			box->parent->flags &= ~stable_flag;
-			clear_flag_in_parents(document, box, BOXFLAG_TREE_SIZE_STABLE);
-		}
+		if (box->parent != NULL && (box->pass_flags[pass] & 
+			(PASSFLAG_WIDTH_DEPENDS_ON_PARENT << axis)) != 0)
+			must_visit(document, box->parent, axis);
+	}
+}
+
+/* Imposes size constraints for both axes of a box in parent-then-child order. */
+static void impose_preorder_constraints(Document *document, SizingPass pass, 
+	Box *box, unsigned child_flags)
+{
+	unsigned axis_flags = box->pass_flags[pass];
+	unsigned child_axis_flags = child_flags;
+	for (unsigned axis = 0; axis < 2; ++axis) {
+		if ((box->flags & (BOXFLAG_WIDTH_STABLE << axis)) != 0)
+			continue;
+		if ((child_axis_flags & PASSFLAG_WIDTH_PREORDER) != 0) 
+			adjust_child_sizes(document, pass, box, (Axis)axis, true);
+		if ((axis_flags & PASSFLAG_WIDTH_PREORDER) != 0)
+			compute_size_from_children(document, pass, box, (Axis)axis, true);
+		axis_flags >>= 1;
+		child_axis_flags >>= 1;
+	}
+}
+
+/* Imposes size constraints for both axes of a box in child-then-parent order. */
+static void impose_postorder_constraints(Document *document, SizingPass pass, 
+	Box *box, unsigned child_flags)
+{
+	unsigned axis_flags = box->pass_flags[pass];
+	unsigned child_axis_flags = child_flags;
+	for (unsigned axis = 0; axis < 2; ++axis) {
+		if ((box->flags & (BOXFLAG_WIDTH_STABLE << axis)) != 0)
+			continue;
+		if ((axis_flags & PASSFLAG_WIDTH_POSTORDER) != 0)
+			compute_size_from_children(document, pass, box, (Axis)axis, false);
+		if ((child_axis_flags & PASSFLAG_WIDTH_POSTORDER) != 0) 
+			adjust_child_sizes(document, pass, box, (Axis)axis, false);
+		axis_flags >>= 1;
+		child_axis_flags >>= 1;
 	}
 }
 
 /* Visits a tree of boxes in preorder, propagating size constraints down and
  * up. */
-bool compute_box_sizes(Document *document, Box *box, bool post_text_layout)
+bool compute_box_sizes(Document *document, SizingPass pass, Box *box)
 {
 	/* Do any boxes in this subtree need visiting? */
 	if ((box->flags & BOXFLAG_TREE_SIZE_STABLE) != 0)
@@ -918,22 +1138,30 @@ bool compute_box_sizes(Document *document, Box *box, bool post_text_layout)
 
 	/* There's no reason to visit inline container boxes before text layout
 	 * has been performed. */
-	if (is_inline_container_box(box) &&
-		(box->flags & BOXFLAG_PARAGRAPH_VALID) == 0)
+	if (pass == PASS_PRE_TEXT_LAYOUT && is_inline_container_box(box))
 		return false;
 
 	/* Optimistically assume that all boxes in the subtree will be marked 
 	 * stable. This will be cleared if any box is marked unstable. */
 	box->flags |= BOXFLAG_TREE_SIZE_STABLE;
 
-	/* Visit boxes in preorder. */
-	for (unsigned axis = 0; axis < 2; ++axis) {
-		if ((box->flags & (BOXFLAG_WIDTH_STABLE << axis)) == 0)
-			update_box_axis(document, box, (Axis)axis, post_text_layout);
-	}
+	/* Use the child flags to skip unnecessary constraint passes entirely. All
+	 * size sets are still gated by (direction, order). */
+	unsigned child_flags = 0;
+	for (const Box *child = box->first_child; child != NULL; 
+		child = child->next_sibling)
+		child_flags |= child->pass_flags[pass];
+	
+	/* Apply parent-then-child constraints. */
+	impose_preorder_constraints(document, pass, box, child_flags);
+	
+	/* Visit children recursively. */
 	for (Box *child = box->first_child; child != NULL; 
 		child = child->next_sibling)
-		compute_box_sizes(document, child, post_text_layout);
+		compute_box_sizes(document, pass, child);
+
+	/* Apply child-then-parent constraints. */
+	impose_postorder_constraints(document, pass, box, child_flags);
 
 	return (box->flags & BOXFLAG_TREE_SIZE_STABLE) != 0;
 }
@@ -952,12 +1180,12 @@ static void position_children(Document *document, Box *box)
 		for (const Box *child = box->first_child; child != NULL; 
 			child = child->next_sibling)
 			total_child_dim += outer_dim(child, major);
-		float slack = box->size[major] - total_child_dim;
+		float slack = get_size(box, major) - total_child_dim;
 		pos_major += (box->arrangement == ALIGN_MIDDLE) ? 0.5f * slack : slack;
 	}
 
 	/* Position each child along the major axis. */
-	float dim_minor = box->size[minor];
+	float dim_minor = get_size(box, minor);
 	for (Box *child = box->first_child; child != NULL; child = child->next_sibling) {
 		/* Determine the minor axis position of the child from its alignment. */
 		float pos_minor = content_edge_lower(box, minor);

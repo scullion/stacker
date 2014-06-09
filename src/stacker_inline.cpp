@@ -805,7 +805,8 @@ static void update_child_token_size(Document *document, Node *node,
 		 * that text, which has only just been performed. We need to compute the
 		 * size before building the element that represents the node in the 
 		 * parent's paragraph. */
-		compute_sizes_iteratively(document, (Node *)token->child, true);
+		compute_sizes_iteratively(document, PASS_POST_TEXT_LAYOUT, 
+			(Node *)token->child);
 		/* Notice that the margins of the box are not included, because
 		 * inline container itself controls the margins of inline 
 		 * boxes. */

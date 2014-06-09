@@ -2000,9 +2000,8 @@ void do_text_layout(Document *document, Node *node)
 	ensure(container_box != NULL);
 	int line_width = UNBOUNDED_LINE_WIDTH;
 	if (container_box->axis == AXIS_V && (container_box->flags & 
-		BOXFLAG_WIDTH_FROM_PARENT_DEFINED) != 0) {
-		float dim = container_box->size_from_parent[AXIS_H];
-		dim -= padding_and_margins(container_box, AXIS_H);
+		BOXFLAG_WIDTH_DEFINED) != 0) {
+		float dim = get_size_directional(container_box, AXIS_H, true);
 		line_width = (unsigned)round_signed(dim);
 	}
 
@@ -2052,12 +2051,11 @@ void do_text_layout(Document *document, Node *node)
 }
 
 /* Iteratively computes box sizes. */
-void compute_sizes_iteratively(Document *document, Node *root, 
-	bool post_text_layout)
+void compute_sizes_iteratively(Document *document, SizingPass pass, Node *root)
 {
 	for (unsigned repetitions = 0; repetitions < 10; ++repetitions) {
 		lmsg("\tBegin iteration %u.\n", repetitions);
-		if (compute_box_sizes(document, root->box, post_text_layout))
+		if (compute_box_sizes(document, pass, root->box))
 			break;
 	}
 }

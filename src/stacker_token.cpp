@@ -57,6 +57,8 @@ extern const char * const TOKEN_STRINGS[NUM_TOKENS] = {
 	"min-height",
 	"max-width",
 	"max-height",
+	"grow",
+	"shrink",
 	"pad",
 	"pad-left",
 	"pad-right",
@@ -302,6 +304,8 @@ bool is_layout_attribute(int token)
 		case TOKEN_MIN_HEIGHT:
 		case TOKEN_MAX_WIDTH:
 		case TOKEN_MAX_HEIGHT:
+		case TOKEN_GROW:
+		case TOKEN_SHRINK:
 		case TOKEN_PADDING:
 		case TOKEN_PADDING_LEFT:
 		case TOKEN_PADDING_RIGHT:
