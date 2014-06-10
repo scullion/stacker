@@ -808,6 +808,8 @@ static void cache_clear(Cache *cache)
 /* Returns a key uniquely identifying a URL. */
 static UrlKey cache_make_key(const char *url, int length = -1)
 {
+	if (url == NULL)
+		return INVALID_URL_KEY;;
 	char buffer[URL_PARSE_BUFFER_SIZE];
 	ParsedUrl *parsed = parse_url(url, length, buffer, sizeof(buffer));
 	return parsed->code != URLPARSE_OK ? INVALID_URL_KEY : 

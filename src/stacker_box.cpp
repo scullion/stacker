@@ -566,7 +566,7 @@ static void initialize_provisional_size(Document *document, Box *box,
 	set_size(document, box, axis, dim, false);
 	invalidate_size(document, PASS_PRE_TEXT_LAYOUT, box, axis);
 	must_visit(document, box, axis);
-	lmsg("\tsize init: box: %s axis: %d new: %.2f",
+	lmsg("size init: box: %s axis: %d new: %.2f\n",
 		get_box_debug_string(box), axis, dim);
 }
 
@@ -590,9 +590,10 @@ bool set_provisional_size(Document *document, SizingPass pass, Box *box,
 
 	if (changed) {
 		invalidate_size(document, pass, box, axis);
-		lmsg("\tsize change: pass: %d box: %s axis: %s, from_parent: %d, "
-			"old: %.2f new: %.2f active: %.2f", pass, get_box_debug_string(box), 
-			axis, from_parent, old, dim, get_active_size(box, axis));
+		lmsg("size change: pass: %d box: %s axis: %d, from_parent: %d, "
+			"old: %.2f new: %.2f active: %.2f\n", pass, 
+			get_box_debug_string(box), axis, from_parent, old, dim, 
+			get_active_size(box, axis));
 	}
 	return changed;
 }
@@ -607,7 +608,7 @@ void set_ideal_size(Document *document, Box *box, Axis axis,
 		box->mode_dim[axis] = (unsigned char)mode;
 		box->ideal[axis] = dim;
 		box->flags &= ~(BOXFLAG_WIDTH_DEFINED << axis);
-		lmsg("\tideal changed: box: %s axis: %d new: %.2f", 
+		lmsg("ideal changed: box: %s axis: %d new: %.2f\n", 
 			get_box_debug_string(box), axis, dim);
 	} else {
 		lmsg("ideal unchanged: box: %s dim: %.2f\n", 

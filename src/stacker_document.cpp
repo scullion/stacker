@@ -593,35 +593,17 @@ void update_document(Document *document)
 		return;
 	document->layout_clock++;
 
-	lmsg("Begin layout, new clock is %u.\n", document->layout_clock);
-	bool rule_tables_changed = check_rule_tables(document);
-	update_nodes_pre_layout(document, root, 0, rule_tables_changed);
-
-	lmsg("\nBegin first box pass.\n");
 	if ((document->flags & DOCFLAG_DEBUG_FULL_LAYOUT) != 0)
 		clear_box_tree_flags(document, root->box, BOXFLAG_LAYOUT_MASK);
+
+	bool rule_tables_changed = check_rule_tables(document);
+	update_nodes_pre_layout(document, root, 0, rule_tables_changed);
 	compute_sizes_iteratively(document, PASS_PRE_TEXT_LAYOUT, root);
-	
-	lmsg("\nBegin text layout pass.\n");
 	do_text_layout(document, root);
-	
-	lmsg("\nBegin second box pass.\n");
 	compute_sizes_iteratively(document, PASS_POST_TEXT_LAYOUT, root);
-
-	lmsg("\nBegin bounds pass.\n");
 	compute_box_bounds(document, root->box);
-	lmsg("End bounds pass.\n\n");
-
-	lmsg("\nBegin post-layout node update.\n");
 	update_nodes_post_layout(document, root);
-	lmsg("\nEnd post-layout node update.\n");
-
-	lmsg("\nBegin depth pass.\n");
 	update_box_clip(document, root->box, INFINITE_RECTANGLE, 0);
-	lmsg("End depth pass.\n\n");
-
-	lmsg("End layout.\n\n");
-
 	refresh_mouse_selection(document);
 
 	document->change_clock_at_layout = document->change_clock;

@@ -1911,7 +1911,6 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 
 	/* Rebuild this node's box. */
 	if ((node->flags & NFLAG_REBUILD_BOXES) != 0) {
-		lmsg("\t[%s] Rebuilding boxes.\n", NODE_TYPE_STRINGS[node->type]);
 		update_node_boxes(document, node);
 		propagate_up |= NFLAG_RECOMPOSE_CHILD_BOXES | NFLAG_UPDATE_TEXT_LAYERS;
 	}
@@ -1919,7 +1918,6 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 	/* If we've rebuilt our own box tree, or child boxes have changed,
 	 * recompose the child boxes into our tree. */
 	if ((node->flags & NFLAG_RECOMPOSE_CHILD_BOXES) != 0) {
-		lmsg("\t[%s] Composing child boxes.\n", NODE_TYPE_STRINGS[node->type]);
 		compose_child_boxes(document, node);
 		node->flags &= ~NFLAG_RECOMPOSE_CHILD_BOXES;
 	}
@@ -2053,11 +2051,11 @@ void do_text_layout(Document *document, Node *node)
 /* Iteratively computes box sizes. */
 void compute_sizes_iteratively(Document *document, SizingPass pass, Node *root)
 {
-	for (unsigned repetitions = 0; repetitions < 10; ++repetitions) {
-		lmsg("\tBegin iteration %u.\n", repetitions);
+	unsigned repetitions = 0;
+	for (repetitions = 0; repetitions < 10; ++repetitions)
 		if (compute_box_sizes(document, pass, root->box))
 			break;
-	}
+	dmsg("Layout took %u iterations.\n", repetitions);
 }
 
 } // namespace stkr
