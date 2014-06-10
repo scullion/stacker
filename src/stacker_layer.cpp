@@ -403,7 +403,7 @@ void set_image_layer_url(Document *document, Node *node,
 	if (url != NULL) {
 		/* Replace the notify handle with one for the new URL. */
 		UrlHandle notify_handle = cache->create_handle(url, -1,
-			urlcache::URLP_NORMAL, urlcache::DEFAULT_TTL_SECS, node, 
+			urlcache::URLP_NORMAL, urlcache::DEFAULT_TTL_SECS, node, 0,
 			document->system->image_layer_notify_id, 
 			urlcache::URL_FLAG_REUSE_DATA_HANDLE);
 		image_changed = il->notify_handle != notify_handle;
