@@ -85,6 +85,7 @@ struct Box {
 	float max[2];
 	float clip[4];
 	float growth[2];
+	float basis;
 	unsigned char axis        : 1;
 	unsigned char arrangement : 2;
 	unsigned char alignment   : 2;

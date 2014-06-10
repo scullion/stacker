@@ -2052,7 +2052,7 @@ void do_text_layout(Document *document, Node *node)
 void compute_sizes_iteratively(Document *document, SizingPass pass, Node *root)
 {
 	unsigned repetitions = 0;
-	for (repetitions = 0; repetitions < 10; ++repetitions)
+ 	for (repetitions = 0; repetitions < 10; ++repetitions)
 		if (compute_box_sizes(document, pass, root->box))
 			break;
 	dmsg("Layout took %u iterations.\n", repetitions);

@@ -927,91 +927,83 @@ static void compute_size_from_children(Document *document, SizingPass pass,
 		set_provisional_size(document, pass, box, axis, dim, false);
 }
 
-/* Returns the starting size of a box for the purposes of grow-shrink sizing. */
-static float basis_size(const Box *box, Axis axis)
+/* Determines a box dimension from the corresponding parent dimension. If the
+ * requested dimension is not defined in terms of the parent, returns the
+ * size computed from children. */
+static float basis_size(const Box *box, Axis axis, float parent_size)
 {
 	switch (box->mode_dim[axis]) {
 		case DMODE_ABSOLUTE:
 			return box->ideal[axis];
 		case DMODE_FRACTIONAL:
-			return get_size_directional(box, axis, true);
+			return box->ideal[axis] * parent_size - 
+				padding_and_margins(box, axis);
 	}
 	return get_size_directional(box, axis, false);
 }
 
-/* Sets the sizes of any children that are a function of the parent size. This
- * doesn't include grow-shrink sizing, which is done in its own pass. */
-static void size_dependent_children(Document *document, SizingPass pass, 
-	Box *box, Axis axis)
+/* Sets the size of children along a box's major axis. */
+static void size_major_axis(Document *document, SizingPass pass, Box *box)
 {
-	float dim = get_active_size(box, axis);
-	for (Box *child = box->first_child; child != NULL;
-		child = child->next_sibling) {
-		int dmode = child->mode_dim[axis];
-		if (dmode == DMODE_ABSOLUTE) {
-			set_provisional_size(document, pass, child, axis, 
-				child->ideal[axis], true);
-		} else if (dmode == DMODE_FRACTIONAL) {
-			float child_dim = dim * child->ideal[axis] - 
-				padding_and_margins(child, axis);
-			set_provisional_size(document, pass, child, axis, child_dim, true);
-		} else if (dmode <= DMODE_AUTO && axis != box->axis) {
-			float child_dim = dim - padding_and_margins(child, axis);
-			set_provisional_size(document, pass, child, axis, child_dim, true);
-		}
-	}
-}
-
-/* Distributes the positive or negative free space in the major axis of a 
- * box between the box's children in proportion to their grow or shrink 
- * factors. */
-static void grow_and_shrink_children(Document *document, SizingPass pass, 
-	Box *box, Axis axis)
-{
-	/* Grow and shrink are only applied along the parent's major axis. */
-	if (axis != box->axis)
+	Axis major = (Axis)box->axis;
+	unsigned defined_flag = BOXFLAG_WIDTH_DEFINED << major;
+	if ((box->flags & defined_flag) == 0)
 		return;
 
-	/* Add up the grow and shrink numbers. */
+	/* Compute basis sizes and add up the grow and shrink factors. */
 	float total_basis_size = 0.0f;
 	float scale[2] = { 0.0f, 0.0f };
-	unsigned defined_flag = BOXFLAG_WIDTH_DEFINED << axis;
+	float parent_dim = get_active_size(box, major);
 	for (Box *child = box->first_child; child != NULL; 
 		child = child->next_sibling) {
-		if ((child->flags & defined_flag) == 0)
+		/* If the child's basis size comes from its own children and remains to
+		 * be calculated, we can't do major axis sizing yet. */
+		if ((child->flags & defined_flag) == 0 && 
+			child->mode_dim[major] <= DMODE_AUTO)
 			return;
-		total_basis_size += basis_size(child, axis) + 
-			padding_and_margins(child, axis);
+		float basis = basis_size(child, major, parent_dim);
+		total_basis_size += basis + padding_and_margins(child, major);
 		scale[GDIR_SHRINK] += child->growth[GDIR_SHRINK];
 		scale[GDIR_GROW] += child->growth[GDIR_GROW];
+		child->basis = basis;
 	}
 
 	/* Calculate the total adjustment. If the adjustment is negative, use
 	 * the shrink factors. If it's possitive, use the grow factors. */
-	float dim = get_active_size(box, axis);
-	float adjustment = dim - total_basis_size;
+	float adjustment = parent_dim - total_basis_size;
 	GrowthDirection gdir = adjustment >= 0.0f ? GDIR_GROW : GDIR_SHRINK;
-	if (fabsf(adjustment) <= FLT_EPSILON || fabsf(scale[gdir]) <= FLT_EPSILON)
-		return;
-	adjustment /= scale[gdir];
+	if (fabsf(scale[gdir]) > FLT_EPSILON)
+		adjustment /= scale[gdir];
 			 
 	/* Distribute the space between the children */
 	for (Box *child = box->first_child; child != NULL;
 		child = child->next_sibling) {
-		float adjusted = basis_size(child, axis) + 
-			adjustment * child->growth[gdir];
-		set_provisional_size(document, pass, child, axis, adjusted, true);
+		float adjusted = child->basis + adjustment * child->growth[gdir];
+		set_provisional_size(document, pass, child, major, adjusted, true);
 	}
 }
 
-static void adjust_child_sizes(Document *document, SizingPass pass, Box *box, 
-	Axis axis)
+/* Sets the size of children along a box's minor axis. */
+static void size_minor_axis(Document *document, SizingPass pass, Box *box)
 {
-	if ((box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0)
+	Axis minor = Axis(box->axis ^ 1);
+	unsigned defined_flag = BOXFLAG_WIDTH_DEFINED << minor;
+	if ((box->flags & defined_flag) == 0)
 		return;
-	size_dependent_children(document, pass, box, axis);
-	grow_and_shrink_children(document, pass, box, axis);
+	float parent_dim = get_active_size(box, minor);
+	for (Box *child = box->first_child; child != NULL; 
+		child = child->next_sibling) {
+		float child_dim;
+		int dmode = child->mode_dim[minor];
+		if (dmode == DMODE_ABSOLUTE || dmode == DMODE_FRACTIONAL) {
+			child_dim = basis_size(child, minor, parent_dim);
+		} else {
+			child_dim = parent_dim - padding_and_margins(child, minor);
+		}
+		set_provisional_size(document, pass, child, minor, child_dim, true);
+	}
 }
+
 
 /* Visits a tree of boxes in preorder, propagating size constraints down and
  * up. */
@@ -1030,8 +1022,8 @@ bool compute_box_sizes(Document *document, SizingPass pass, Box *box)
 	 * stable. This will be cleared if any box is marked unstable. */
 	box->flags |= BOXFLAG_TREE_SIZE_STABLE;
 	
-	adjust_child_sizes(document, pass, box, AXIS_H);
-	adjust_child_sizes(document, pass, box, AXIS_V);
+	size_major_axis(document, pass, box);
+	size_minor_axis(document, pass, box);
 	for (Box *child = box->first_child; child != NULL; child = child->next_sibling)
 		compute_box_sizes(document, pass, child);
 	if ((box->pass_flags[pass] & PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN) != 0)
