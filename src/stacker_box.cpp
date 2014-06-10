@@ -387,9 +387,16 @@ inline bool sizes_equal(float a, float b)
 /* Sets one half of a box's size slot, making the incoming side the active
  * side if 1) this is the first time the slot has been set this tick, or 2)
  * the slot is currently using the reserve side. */
-static void set_size(const Document *document, Box *box, Axis axis, 
+static bool set_size(const Document *document, Box *box, Axis axis, 
 	float dim, bool from_parent)
 {
+	box->sizes[from_parent][axis] = dim;
+	if ((box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0) {
+		/* The first time a size is defined, it is copied into both parent and 
+		 * child slots to simplify change detection. */
+		box->flags |= BOXFLAG_WIDTH_DEFINED << axis;
+		box->sizes[from_parent ^ 1][axis] = dim;
+	}
 	unsigned axis_flags = box->flags >> axis;
 	unsigned active = axis_flags / BOXFLAG_WIDTH_ACTIVE_ABOVE;
 	unsigned primary = axis_flags / BOXFLAG_WIDTH_PRIMARY_ABOVE;
@@ -398,13 +405,7 @@ static void set_size(const Document *document, Box *box, Axis axis,
 	unsigned diff = ((unsigned(from_parent) ^ active) & mask);
 	box->flags ^= (diff * BOXFLAG_WIDTH_ACTIVE_ABOVE) << axis;
 	box->size_stamp[axis] = document->layout_clock;
-	box->sizes[from_parent][axis] = dim;
-	if ((box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0) {
-		/* The first time a size is defined, it is copied into both parent and 
-		 * child slots to simplify change detection. */
-		box->flags |= BOXFLAG_WIDTH_DEFINED << axis;
-		box->sizes[from_parent ^ 1][axis] = dim;
-	}
+	return ((active ^ diff) & 1) != 0;
 }
 
 /* Applies a box's size limits to 'dim'. */
@@ -471,41 +472,50 @@ static void update_layout_flags(Document *document, Box *box)
 {
 	document;
 
-	unsigned pass0 = PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN | 
-		PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN;
-	unsigned pass1_diff = 0;
+	bool is_inline = is_inline_container_box(box);
+	unsigned pass0 = PASSFLAG_ALL, pass1_diff = 0;
 	for (unsigned axis = 0; axis < 2; ++axis) {
+		unsigned primary_above_flag = BOXFLAG_WIDTH_PRIMARY_ABOVE << axis;
+		unsigned children_flag = PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN << axis;
+		unsigned fixed_flag = BOXFLAG_WIDTH_FIXED << axis;
+
 		/* When a box's dimension is absolute or fractional, or, along the 
 		 * parent's major axis only, the box has nonzero grow or shrink factors, 
 		 * then the box's position is set by its parent, so the from-above side 
 		 * of its size slot takes precedence. */
 		DimensionMode dmode = (DimensionMode)box->mode_dim[axis];
 		if (dmode == DMODE_ABSOLUTE || dmode == DMODE_FRACTIONAL || 
-			(box->parent != NULL && axis == box->parent->axis && 
+			(!is_inline && box->parent != NULL && axis == box->parent->axis && 
 				may_grow_or_shrink(box))) {
-			box->flags |= (BOXFLAG_WIDTH_PRIMARY_ABOVE << axis);
+			box->flags |= primary_above_flag;
 			/* Fixed dimensions are pre-initialized and independent of the box's
 			 * children. */
-			if ((box->flags & (BOXFLAG_WIDTH_FIXED << axis)) != 0)
-				pass0 &= ~(PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN << axis);
+			if ((box->flags & fixed_flag) != 0)
+				pass0 &= ~children_flag;
 		} else {
 			/* No explicit dimension, so the box shrinks to fit its children. */
-			box->flags &= ~(BOXFLAG_WIDTH_PRIMARY_ABOVE << axis);
+			box->flags &= ~primary_above_flag;
 			/* Text boxes are invalid in the pre-text-layout pass, so disable 
 			 * sizing inline containers from their children before text layout
 			 * has been performed. */
-			if (is_inline_container_box(box)) {
-				pass0 &= ~(PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN | 
-					PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN);
-				pass1_diff |= (PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN | 
-					PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN);
+			if (is_inline) {
+				pass0 &= ~children_flag;
+				pass1_diff |= children_flag;
 			}
 		}
 	}
-	
+	unsigned pass1 = pass0 ^ pass1_diff;
+
+	/* A limitation of Stacker's two-pass system is that text layout widths
+	 * must be computed entirely in the first pass. It doesn't make sense to
+	 * change the width of an inline container in post-text-layout, because
+	 * doing so would necessitate a repeat of text layout. Clearing this flag
+	 * makes inline containers refuse to change size in the second pass. */
+	if (is_inline)
+		pass1 &= ~PASSFLAG_PARENT_MASK;
+
 	/* The preorder and postorder bits can only be set if the corresponding
 	 * depends-on bit is set. */
-	unsigned pass1 = pass0 ^ pass1_diff;
 	box->pass_flags[PASS_PRE_TEXT_LAYOUT] = (uint8_t)pass0;
 	box->pass_flags[PASS_POST_TEXT_LAYOUT] = (uint8_t)pass1;
 }
@@ -519,7 +529,7 @@ static void update_layout_info(Document *document, Box *box)
 }
 
 /* A box dimension has changed. */
-static void invalidate_size(Document *document, SizingPass pass, Box *box, Axis axis)
+static void active_size_changed(Document *document, SizingPass pass, Box *box, Axis axis)
 {
 	unsigned stable_flag = BOXFLAG_WIDTH_STABLE << axis;
 	unsigned clear_in_parents = 0;
@@ -568,7 +578,7 @@ static void initialize_provisional_size(Document *document, Box *box,
 {
 	dim = apply_min_max(box, axis, dim);
 	set_size(document, box, axis, dim, false);
-	invalidate_size(document, PASS_PRE_TEXT_LAYOUT, box, axis);
+	active_size_changed(document, PASS_PRE_TEXT_LAYOUT, box, axis);
 	must_visit(document, box, axis);
 	lmsg("size init: box: %s axis: %d new: %.2f\n",
 		get_box_debug_string(box), axis, dim);
@@ -580,20 +590,26 @@ static void initialize_provisional_size(Document *document, Box *box,
 bool set_provisional_size(Document *document, SizingPass pass, Box *box, 
 	Axis axis, float dim, bool from_parent)
 {
+	/* Enforce the guard bit that prevents the primary size of inline containers
+	 * being modified in the post text layout pass. */
+	if (from_parent && (box->pass_flags[pass] & 
+		(PASSFLAG_COMPUTE_WIDTH_FROM_PARENT << axis)) == 0 && 
+		(((box->flags >> axis) / BOXFLAG_WIDTH_PRIMARY_ABOVE) & 1) != 0)
+		return false;
+
 	/* Is the constrained dimension different from the one stored? */
 	dim = apply_min_max(box, axis, dim);
 	float old = box->sizes[from_parent][axis];
 	bool changed = (box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0 || 
 		!sizes_equal(dim, old);
 
-	/* Store the new size. Note that 'changed' means the new size is the same as
-	 * one most recently set in the same direction, not necessarily that it's
-	 * the same as the active size, so we have to do this even if 'changed' is
-	 * false. */
-	set_size(document, box, axis, dim, from_parent);
+	/* Store the new size. */
+	bool active = set_size(document, box, axis, dim, from_parent);
 
-	if (changed) {
-		invalidate_size(document, pass, box, axis);
+	/* If we have changed the active size, we have new information to 
+	 * propagate. */
+	if (changed && active) {
+		active_size_changed(document, pass, box, axis);
 		lmsg("size change: pass: %d box: %s axis: %d, from_parent: %d, "
 			"old: %.2f new: %.2f active: %.2f\n", pass, 
 			get_box_debug_string(box), axis, from_parent, old, dim, 
@@ -934,16 +950,26 @@ static void compute_size_from_children(Document *document, SizingPass pass,
 /* Determines a box dimension from the corresponding parent dimension. If the
  * requested dimension is not defined in terms of the parent, returns the
  * size computed from children. */
-static float basis_size(const Box *box, Axis axis, float parent_size)
+static bool compute_basis(SizingPass pass, const Box *box, Axis axis, 
+	float parent_size, float *out_basis)
 {
 	switch (box->mode_dim[axis]) {
 		case DMODE_ABSOLUTE:
-			return box->ideal[axis];
+			*out_basis = box->ideal[axis];
+			return true;
 		case DMODE_FRACTIONAL:
-			return box->ideal[axis] * parent_size - 
+			*out_basis = box->ideal[axis] * parent_size - 
 				padding_and_margins(box, axis);
+			return true;
 	}
-	return get_size_directional(box, axis, false);
+	if ((box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0)
+		return false;
+	if ((box->pass_flags[pass] & 
+		(PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN << axis)) != 0) {
+		*out_basis = get_size_directional(box, axis, false);
+		return true;
+	}
+	return false;
 }
 
 /* Sets the size of children along a box's major axis. */
@@ -954,22 +980,34 @@ static void size_major_axis(Document *document, SizingPass pass, Box *box)
 	if ((box->flags & defined_flag) == 0)
 		return;
 
-	/* Compute basis sizes and add up the grow and shrink factors. */
+	/* Compute basis sizes and add up the grow and shrink factors. Children
+	 * that do not define a basis are given an artifical basis of zero with
+	 * default grow and shrink factors of one. This default is important for
+	 * inline containers, which must establish a text layout width in the 
+	 * first pass, and yet in the absence of an explicit dimension have no 
+	 * basis. */
 	float total_basis_size = 0.0f;
 	float scale[2] = { 0.0f, 0.0f };
 	float parent_dim = get_active_size(box, major);
 	for (Box *child = box->first_child; child != NULL; 
-		child = child->next_sibling) {
-		/* If the child's basis size comes from its own children and remains to
-		 * be calculated, we can't do major axis sizing yet. */
-		if ((child->flags & defined_flag) == 0 && 
-			child->mode_dim[major] <= DMODE_AUTO)
-			return;
-		float basis = basis_size(child, major, parent_dim);
-		total_basis_size += basis + padding_and_margins(child, major);
-		scale[GDIR_SHRINK] += child->growth[GDIR_SHRINK];
-		scale[GDIR_GROW] += child->growth[GDIR_GROW];
-		child->basis = basis;
+			child = child->next_sibling) {
+		float basis, grow, shrink;
+		if (compute_basis(pass, child, major, parent_dim, &basis)) {
+			total_basis_size += basis;
+			shrink = child->growth[GDIR_SHRINK];
+			grow = child->growth[GDIR_GROW];
+			child->basis = basis;
+			child->flags |= BOXFLAG_MARK;
+		} else {
+			shrink = (child->mode_growth[GDIR_SHRINK] != ADEF_UNDEFINED) ? 
+				child->growth[GDIR_SHRINK] : 1.0f;
+			grow = (child->mode_growth[GDIR_GROW] != ADEF_UNDEFINED) ? 
+				child->growth[GDIR_GROW] : 1.0f;
+			child->flags &= ~BOXFLAG_MARK;
+		}
+		scale[GDIR_SHRINK] += shrink;
+		scale[GDIR_GROW] += grow;
+		total_basis_size += padding_and_margins(child, major);
 	}
 
 	/* Calculate the total adjustment. If the adjustment is negative, use
@@ -980,9 +1018,16 @@ static void size_major_axis(Document *document, SizingPass pass, Box *box)
 		adjustment /= scale[gdir];
 			 
 	/* Distribute the space between the children */
-	for (Box *child = box->first_child; child != NULL;
+	for (Box *child = box->first_child; child != NULL; 
 		child = child->next_sibling) {
-		float adjusted = child->basis + adjustment * child->growth[gdir];
+		float adjusted;
+		if ((child->flags & BOXFLAG_MARK) != 0) {
+			adjusted = child->basis + adjustment * child->growth[gdir];
+		} else {
+			adjusted = adjustment;
+			if (child->mode_growth[gdir] != ADEF_UNDEFINED)
+				adjusted *= child->growth[gdir];
+		}
 		set_provisional_size(document, pass, child, major, adjusted, true);
 	}
 }
@@ -999,11 +1044,9 @@ static void size_minor_axis(Document *document, SizingPass pass, Box *box)
 		child = child->next_sibling) {
 		float child_dim;
 		int dmode = child->mode_dim[minor];
-		if (dmode == DMODE_ABSOLUTE || dmode == DMODE_FRACTIONAL) {
-			child_dim = basis_size(child, minor, parent_dim);
-		} else {
+		if ((dmode != DMODE_ABSOLUTE && dmode != DMODE_FRACTIONAL) ||
+			!compute_basis(pass, child, minor, parent_dim, &child_dim))
 			child_dim = parent_dim - padding_and_margins(child, minor);
-		}
 		set_provisional_size(document, pass, child, minor, child_dim, true);
 	}
 }

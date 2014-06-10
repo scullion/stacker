@@ -1,0 +1,9 @@
+<hbox width=100% background=rgba(0,0,0, 0.3) pad=16 >
+	<vbox width=100 height=100 background=rgba(255, 0, 0, 0.3) />
+	<p indent=0>Shrink-to-fit inline containers need artificial dimensions from above to 
+		make sure they define a text layout width in the first pass.</p>
+	<vbox width=100 height=100 background=rgba(255, 0, 0, 0.3) />
+	<p indent=0>Shrink-to-fit inline containers need artificial dimensions from above to 
+		make sure they define a text layout width in the first pass.</p>
+</hbox>  
+<rule match="p" pad=10 />

@@ -40,13 +40,9 @@ enum BoxFlag {
 	BOXFLAG_CLIP_LEFT                  = 1 << 20, // Don't draw pixels left of the box's left edge.
 	BOXFLAG_CLIP_RIGHT                 = 1 << 21, // Don't draw pixels right of the box's right edge.
 	BOXFLAG_CLIP_TOP                   = 1 << 22, // Don't draw pixels above the box's top edge.
-	BOXFLAG_CLIP_BOTTOM                = 1 << 23  // Don't draw pixels below the box's bottom edge.
-};
+	BOXFLAG_CLIP_BOTTOM                = 1 << 23, // Don't draw pixels below the box's bottom edge.
 
-/* Per-pass bits that enable particular constraints for a box. */
-enum PassFlag {
-	PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN  = 1 << 0,
-	PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN = 1 << 1
+	BOXFLAG_MARK                       = 1 << 31  // Temporary marker.
 };
 
 const unsigned BOXFLAG_DEFINED_MASK              = BOXFLAG_WIDTH_DEFINED | BOXFLAG_HEIGHT_DEFINED;
@@ -55,10 +51,21 @@ const unsigned BOXFLAG_SET_BY_PARENT_MASK        = BOXFLAG_WIDTH_ACTIVE_ABOVE | 
 const unsigned BOXFLAG_LAYOUT_MASK               = BOXFLAG_STABLE_MASK | BOXFLAG_TREE_SIZE_STABLE | 
                                                    BOXFLAG_BOUNDS_DEFINED | BOXFLAG_CHILD_BOUNDS_VALID | 
                                                    BOXFLAG_TREE_BOUNDS_VALID;
+const unsigned BOXFLAG_CLIP_X                    = BOXFLAG_CLIP_LEFT | BOXFLAG_CLIP_RIGHT;
+const unsigned BOXFLAG_CLIP_Y                    = BOXFLAG_CLIP_TOP | BOXFLAG_CLIP_BOTTOM;
+const unsigned BOXFLAG_CLIP_ALL                  = BOXFLAG_CLIP_X | BOXFLAG_CLIP_Y;
 
-const unsigned BOXFLAG_CLIP_X  = BOXFLAG_CLIP_LEFT | BOXFLAG_CLIP_RIGHT;
-const unsigned BOXFLAG_CLIP_Y  = BOXFLAG_CLIP_TOP | BOXFLAG_CLIP_BOTTOM;
-const unsigned BOXFLAG_CLIP_ALL= BOXFLAG_CLIP_X | BOXFLAG_CLIP_Y;
+/* Per-pass bits that enable particular constraints for a box. */
+enum PassFlag {
+	PASSFLAG_COMPUTE_WIDTH_FROM_PARENT    = 1 << 0,
+	PASSFLAG_COMPUTE_HEIGHT_FROM_PARENT   = 1 << 1,
+	PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN  = 1 << 2,
+	PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN = 1 << 3
+};
+
+const unsigned PASSFLAG_PARENT_MASK   = PASSFLAG_COMPUTE_WIDTH_FROM_PARENT | PASSFLAG_COMPUTE_HEIGHT_FROM_PARENT;
+const unsigned PASSFLAG_CHILDREN_MASK = PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN | PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN;
+const unsigned PASSFLAG_ALL           = PASSFLAG_PARENT_MASK | PASSFLAG_CHILDREN_MASK;
 
 enum GrowthDirection { GDIR_GROW, GDIR_SHRINK };
 

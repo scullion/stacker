@@ -2055,7 +2055,6 @@ void compute_sizes_iteratively(Document *document, SizingPass pass, Node *root)
  	for (repetitions = 0; repetitions < 10; ++repetitions)
 		if (compute_box_sizes(document, pass, root->box))
 			break;
-	dmsg("Layout took %u iterations.\n", repetitions);
 }
 
 } // namespace stkr
