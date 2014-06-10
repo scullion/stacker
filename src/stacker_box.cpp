@@ -475,10 +475,14 @@ static void update_layout_flags(Document *document, Box *box)
 		PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN;
 	unsigned pass1_diff = 0;
 	for (unsigned axis = 0; axis < 2; ++axis) {
+		/* When a box's dimension is absolute or fractional, or, along the 
+		 * parent's major axis only, the box has nonzero grow or shrink factors, 
+		 * then the box's position is set by its parent, so the from-above side 
+		 * of its size slot takes precedence. */
 		DimensionMode dmode = (DimensionMode)box->mode_dim[axis];
-		if (dmode == DMODE_ABSOLUTE || dmode == DMODE_FRACTIONAL) {
-			/* The box has an explicit dimension, so its size is defined by the
-			 * ABOVE half of the slot. */
+		if (dmode == DMODE_ABSOLUTE || dmode == DMODE_FRACTIONAL || 
+			(box->parent != NULL && axis == box->parent->axis && 
+				may_grow_or_shrink(box))) {
 			box->flags |= (BOXFLAG_WIDTH_PRIMARY_ABOVE << axis);
 			/* Fixed dimensions are pre-initialized and independent of the box's
 			 * children. */
