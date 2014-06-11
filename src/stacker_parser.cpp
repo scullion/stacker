@@ -706,7 +706,8 @@ static int parse_attribute_list(Parser *parser, AttributeAssignment *assignments
 			AttributeSemantic as = attribute_semantic(name_token);
 			if (as == ASEM_FLAG) {
 				value_token = TOKEN_BOOLEAN;
-				value.integer = true;
+				variant_set_integer(&value, true, VSEM_BOOLEAN);
+				op = AOP_SET;
 				synthetic = true;
 			} else if (num_attributes == 0) {
 				continue;
