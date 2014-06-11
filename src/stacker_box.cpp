@@ -524,10 +524,14 @@ static void update_layout_flags(Document *document, Box *box)
 	/* A limitation of Stacker's two-pass system is that text layout widths
 	 * must be computed entirely in the first pass. It doesn't make sense to
 	 * change the width of an inline container in post-text-layout, because
-	 * doing so would necessitate a repeat of text layout. Clearing this flag
-	 * makes inline containers refuse to change size in the second pass. */
-	if (is_inline)
-		pass1 &= ~PASSFLAG_PARENT_MASK;
+	 * doing so would necessitate a repeat of text layout. Here we configure the
+	 * pass flags so that inline containers do not participate in from-parent
+	 * sizing in the second pass. In addition, as an optimization, it's not
+	 * necessary for inline containers to size their children.*/
+	if (is_inline) {
+		pass0 &= ~PASSFLAG_SIZE_CHILDREN_MASK;
+		pass1 &= ~(PASSFLAG_SIZE_CHILDREN_MASK | PASSFLAG_FROM_PARENT_MASK);
+	}
 
 	/* The preorder and postorder bits can only be set if the corresponding
 	 * depends-on bit is set. */
@@ -935,7 +939,7 @@ static void compute_size_from_children(Document *document, SizingPass pass,
 				dim_defined = false;
 				break;
 			}
-			dim += get_active_size(child, axis) + 
+			dim += get_size(child, axis) + 
 				padding_and_margins(child, axis);
 		}
 	} else {
@@ -946,7 +950,7 @@ static void compute_size_from_children(Document *document, SizingPass pass,
 				dim_defined = false;
 				break;
 			}
-			float outer = get_active_size(child, axis) + 
+			float outer = get_size(child, axis) + 
 				padding_and_margins(child, axis);
 			dim = (child->prev_sibling != NULL) ? std::max(dim, outer) : outer;
 		}	
@@ -1085,8 +1089,10 @@ bool compute_box_sizes(Document *document, SizingPass pass, Box *box)
 	 * stable. This will be cleared if any box is marked unstable. */
 	box->flags |= BOXFLAG_TREE_SIZE_STABLE;
 	
-	size_major_axis(document, pass, box);
-	size_minor_axis(document, pass, box);
+	if ((box->pass_flags[pass] & PASSFLAG_SIZE_CHILDREN_MAJOR) != 0)
+		size_major_axis(document, pass, box);
+	if ((box->pass_flags[pass] & PASSFLAG_SIZE_CHILDREN_MINOR) != 0)
+		size_minor_axis(document, pass, box);
 	for (Box *child = box->first_child; child != NULL; child = child->next_sibling)
 		compute_box_sizes(document, pass, child);
 	if ((box->pass_flags[pass] & PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN) != 0)
