@@ -42,7 +42,7 @@ enum BoxFlag {
 	BOXFLAG_CLIP_TOP                   = 1 << 22, // Don't draw pixels above the box's top edge.
 	BOXFLAG_CLIP_BOTTOM                = 1 << 23, // Don't draw pixels below the box's bottom edge.
 
-	BOXFLAG_MARK                       = 1 << 31  // Temporary marker.
+	BOXFLAG_HAS_BASIS                  = 1 << 31  // Temporary marker.
 };
 
 const unsigned BOXFLAG_DEFINED_MASK              = BOXFLAG_WIDTH_DEFINED | BOXFLAG_HEIGHT_DEFINED;

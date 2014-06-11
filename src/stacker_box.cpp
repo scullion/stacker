@@ -384,19 +384,13 @@ inline bool sizes_equal(float a, float b)
 	return fabsf(a - b) < 0.5f;
 }
 
-/* Sets one half of a box's size slot, making the incoming side the active
- * side if 1) this is the first time the slot has been set this tick, or 2)
- * the slot is currently using the reserve side. */
-static bool set_size(const Document *document, Box *box, Axis axis, 
-	float dim, bool from_parent)
+/* Activates the side of an axis size slot indicated by 'from_parent' if either
+ * 1) the slot has not yet been modified this tick, or 2) 'from_parent' is
+ * the primary side and the reserve side is currently active. Returns true if
+ * the side indicated by 'from_parent' is now active. */
+static bool activate_slot(const Document *document, Box *box, Axis axis, 
+	bool from_parent)
 {
-	box->sizes[from_parent][axis] = dim;
-	if ((box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0) {
-		/* The first time a size is defined, it is copied into both parent and 
-		 * child slots to simplify change detection. */
-		box->flags |= BOXFLAG_WIDTH_DEFINED << axis;
-		box->sizes[from_parent ^ 1][axis] = dim;
-	}
 	unsigned axis_flags = box->flags >> axis;
 	unsigned active = axis_flags / BOXFLAG_WIDTH_ACTIVE_ABOVE;
 	unsigned primary = axis_flags / BOXFLAG_WIDTH_PRIMARY_ABOVE;
@@ -406,6 +400,27 @@ static bool set_size(const Document *document, Box *box, Axis axis,
 	box->flags ^= (diff * BOXFLAG_WIDTH_ACTIVE_ABOVE) << axis;
 	box->size_stamp[axis] = document->layout_clock;
 	return ((active ^ diff) & 1) != 0;
+}
+
+/* Copies a size into one half of an axis size slot. */
+static void store_size(Box *box, Axis axis, float dim, bool from_parent)
+{
+	box->sizes[from_parent][axis] = dim;
+	if ((box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0) {
+		/* The first time a size is defined, it is copied into both parent and 
+		 * child slots to simplify change detection. */
+		box->flags |= BOXFLAG_WIDTH_DEFINED << axis;
+		box->sizes[from_parent ^ 1][axis] = dim;
+	}
+}
+
+/* Sets an axis size from above or below as indicated by 'from_parent'. */
+static bool set_size(const Document *document, Box *box, Axis axis, 
+	float dim, bool from_parent)
+{
+	bool active = activate_slot(document, box, axis, from_parent);
+	store_size(box, axis, dim, from_parent);
+	return active;
 }
 
 /* Applies a box's size limits to 'dim'. */
@@ -590,26 +605,19 @@ static void initialize_provisional_size(Document *document, Box *box,
 bool set_provisional_size(Document *document, SizingPass pass, Box *box, 
 	Axis axis, float dim, bool from_parent)
 {
-	/* Enforce the guard bit that prevents the primary size of inline containers
-	 * being modified in the post text layout pass. */
-	if (from_parent && (box->pass_flags[pass] & 
-		(PASSFLAG_COMPUTE_WIDTH_FROM_PARENT << axis)) == 0 && 
-		(((box->flags >> axis) / BOXFLAG_WIDTH_PRIMARY_ABOVE) & 1) != 0)
-		return false;
-
 	/* Is the constrained dimension different from the one stored? */
 	dim = apply_min_max(box, axis, dim);
 	float old = box->sizes[from_parent][axis];
 	bool changed = (box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0 || 
 		!sizes_equal(dim, old);
 
-	/* Store the new size. */
-	bool active = set_size(document, box, axis, dim, from_parent);
-
-	/* If we have changed the active size, we have new information to 
-	 * propagate. */
-	if (changed && active) {
-		active_size_changed(document, pass, box, axis);
+	/* If an active size is being changed, mark the box for a visit to propagate 
+	 * the new size to dependent box axes. */
+	bool active = activate_slot(document, box, axis, from_parent);
+	if (changed) {
+		store_size(box, axis, dim, from_parent);
+		if (active)
+			active_size_changed(document, pass, box, axis);
 		lmsg("size change: pass: %d box: %s axis: %d, from_parent: %d, "
 			"old: %.2f new: %.2f active: %.2f\n", pass, 
 			get_box_debug_string(box), axis, from_parent, old, dim, 
@@ -989,6 +997,7 @@ static void size_major_axis(Document *document, SizingPass pass, Box *box)
 	float total_basis_size = 0.0f;
 	float scale[2] = { 0.0f, 0.0f };
 	float parent_dim = get_active_size(box, major);
+	unsigned enable_flag = PASSFLAG_COMPUTE_WIDTH_FROM_PARENT << major;
 	for (Box *child = box->first_child; child != NULL; 
 			child = child->next_sibling) {
 		float basis, grow, shrink;
@@ -997,16 +1006,18 @@ static void size_major_axis(Document *document, SizingPass pass, Box *box)
 			shrink = child->growth[GDIR_SHRINK];
 			grow = child->growth[GDIR_GROW];
 			child->basis = basis;
-			child->flags |= BOXFLAG_MARK;
+			child->flags |= BOXFLAG_HAS_BASIS;
 		} else {
 			shrink = (child->mode_growth[GDIR_SHRINK] != ADEF_UNDEFINED) ? 
 				child->growth[GDIR_SHRINK] : 1.0f;
 			grow = (child->mode_growth[GDIR_GROW] != ADEF_UNDEFINED) ? 
 				child->growth[GDIR_GROW] : 1.0f;
-			child->flags &= ~BOXFLAG_MARK;
+			child->flags &= ~BOXFLAG_HAS_BASIS;
 		}
-		scale[GDIR_SHRINK] += shrink;
-		scale[GDIR_GROW] += grow;
+		if ((child->pass_flags[pass] & enable_flag) != 0) {
+			scale[GDIR_SHRINK] += shrink;
+			scale[GDIR_GROW] += grow;
+		}
 		total_basis_size += padding_and_margins(child, major);
 	}
 
@@ -1020,8 +1031,10 @@ static void size_major_axis(Document *document, SizingPass pass, Box *box)
 	/* Distribute the space between the children */
 	for (Box *child = box->first_child; child != NULL; 
 		child = child->next_sibling) {
+		if ((child->pass_flags[pass] & enable_flag) == 0)
+			continue;
 		float adjusted;
-		if ((child->flags & BOXFLAG_MARK) != 0) {
+		if ((child->flags & BOXFLAG_HAS_BASIS) != 0) {
 			adjusted = child->basis + adjustment * child->growth[gdir];
 		} else {
 			adjusted = adjustment;
@@ -1039,9 +1052,12 @@ static void size_minor_axis(Document *document, SizingPass pass, Box *box)
 	unsigned defined_flag = BOXFLAG_WIDTH_DEFINED << minor;
 	if ((box->flags & defined_flag) == 0)
 		return;
+	unsigned enabled_flag = PASSFLAG_COMPUTE_WIDTH_FROM_PARENT << minor;
 	float parent_dim = get_active_size(box, minor);
 	for (Box *child = box->first_child; child != NULL; 
 		child = child->next_sibling) {
+		if ((child->pass_flags[pass] & enabled_flag) == 0)
+			continue;
 		float child_dim;
 		int dmode = child->mode_dim[minor];
 		if ((dmode != DMODE_ABSOLUTE && dmode != DMODE_FRACTIONAL) ||
