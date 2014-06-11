@@ -243,7 +243,8 @@ static const char *gui_format(GuiState *state, const char *fmt, ...)
 
 static void gui_dump_update(GuiState *state)
 {
-	SetWindowTextA(state->dump_control, &state->dump_buffer[0]);
+	if (!state->dump_buffer.empty())
+		SetWindowTextA(state->dump_control, &state->dump_buffer[0]);
 	SendMessage(state->dump_control, EM_LINESCROLL, 0, 10000); 
 	state->need_dump_update = false;
 }

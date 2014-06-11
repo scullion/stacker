@@ -166,11 +166,18 @@ void dump_boxes(const Document *document, const Box *box, unsigned indent)
 		"pad=(%.2f/%d, %.2f/%d, %.2f/%d, %.2f/%d) "
 		"mrg=(%.2f/%d, %.2f/%d, %.2f/%d, %.2f/%d)"
 		"\n% *s    | "
+		"cell_code=%.8Xh, "
 		"primary_slot=(%u, %u), "
 		"active_slot=(%u, %u), "
 		"\n% *s    | "
-		"compute_width_from_children[pre_text_layout]=(%u, %u), "
-		"compute_width_from_children[post_text_layout]=(%u, %u), "
+		"size_children[pre_text_layout]=(major: %u, minor: %u), "
+		"size_children[post_text_layout]=(major: %u, minor: %u), "
+		"\n% *s    | "
+		"size_from_children[pre_text_layout]=(%u, %u), "
+		"size_from_children[post_text_layout]=(%u, %u), "
+		"\n% *s    | "
+		"size_from_parent[pre_text_layout]=(%u, %u), "
+		"size_from_parent[post_text_layout]=(%u, %u), "
 		"\n% *s    | "
 		"tokens=(%d, %d)"
 		"\n", 
@@ -192,15 +199,26 @@ void dump_boxes(const Document *document, const Box *box, unsigned indent)
 		box->margin_lower[AXIS_H], box->mode_margin_lower[AXIS_H], box->margin_lower[AXIS_V], box->mode_margin_lower[AXIS_V],
 		box->margin_upper[AXIS_H], box->mode_margin_upper[AXIS_H], box->margin_upper[AXIS_V], box->mode_margin_upper[AXIS_V],
 		indent, "",
+		box->cell_code,
 		(box->flags & BOXFLAG_WIDTH_PRIMARY_ABOVE) != 0,
 		(box->flags & BOXFLAG_HEIGHT_PRIMARY_ABOVE) != 0,
 		(box->flags & BOXFLAG_WIDTH_ACTIVE_ABOVE) != 0,
 		(box->flags & BOXFLAG_HEIGHT_ACTIVE_ABOVE) != 0,
 		indent, "",
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_SIZE_CHILDREN_MAJOR) != 0,
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_SIZE_CHILDREN_MINOR) != 0,
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_SIZE_CHILDREN_MAJOR) != 0,
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_SIZE_CHILDREN_MINOR) != 0,
+		indent, "",
 		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN) != 0,
 		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN) != 0,
 		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN) != 0,
 		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN) != 0,
+		indent, "",
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_COMPUTE_WIDTH_FROM_PARENT) != 0,
+		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_COMPUTE_HEIGHT_FROM_PARENT) != 0,
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_COMPUTE_WIDTH_FROM_PARENT) != 0,
+		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_COMPUTE_HEIGHT_FROM_PARENT) != 0,
 		indent, "",
 		box->token_start, box->token_end
 	);

@@ -299,7 +299,7 @@ void depth_sort_boxes(const Box **boxes, unsigned count)
 /* Changes a parent box's layout flags in response to a child box being added to
  * or removed from its child list. */
 static void box_notify_child_added_or_removed(Document *document, 
-	Box *parent, Box *child)
+	Box *parent, Box *child, bool removed)
 {
 	/* If the parent's size depends on the size of its children, it will
 	 * need to be recalculated. */
@@ -311,24 +311,32 @@ static void box_notify_child_added_or_removed(Document *document,
 	/* Depending on the parent's arragement mode, removing a box may shift
 	 * its siblings. */
 	bool siblings_will_move = true;
-	if (child != NULL) {
-		switch (parent->arrangement) {
-			case ALIGN_END:
-				siblings_will_move = child->prev_sibling != NULL;
-				break;
-			case ALIGN_MIDDLE:
-				siblings_will_move = true;
-				break;
-			case ALIGN_START:
-			default:
-				siblings_will_move = child->next_sibling != NULL;
-				break;
+	if (removed) {
+		if (child != NULL) {
+			switch (parent->arrangement) {
+				case ALIGN_END:
+					siblings_will_move = child->prev_sibling != NULL;
+					break;
+				case ALIGN_MIDDLE:
+					siblings_will_move = true;
+					break;
+				case ALIGN_START:
+				default:
+					siblings_will_move = child->next_sibling != NULL;
+					break;
+			}
 		}
-	}
-	if (siblings_will_move) {
+		if (siblings_will_move) {
+			parent->flags &= ~BOXFLAG_CHILD_BOUNDS_VALID;
+			clear_in_parents |= BOXFLAG_TREE_BOUNDS_VALID;
+		}
+	} else {
+		/* Regardless of whether siblings move, the new child itself must be 
+		 * positioned. */
 		parent->flags &= ~BOXFLAG_CHILD_BOUNDS_VALID;
 		clear_in_parents |= BOXFLAG_TREE_BOUNDS_VALID;
 	}
+
 	/* Clear the required parent flags. */
 	if (clear_in_parents != 0) {
 		parent->flags &= ~clear_in_parents;
@@ -653,7 +661,7 @@ void remove_from_parent(Document *document, Box *box)
 	Box *parent = box->parent;
 	if (parent != NULL) {
 		/* Update layout flags. */
-		box_notify_child_added_or_removed(document, parent, box);
+		box_notify_child_added_or_removed(document, parent, box, true);
 		/* Remove the box from the sibling chain. */
 		list_remove((void **)&parent->first_child, (void **)&parent->last_child, 
 			box, offsetof(Box, prev_sibling));
@@ -671,7 +679,7 @@ void append_child(Document *document, Box *parent, Box *child)
 		child, NULL, 
 		offsetof(Box, prev_sibling));
 	child->parent = parent;
-	box_notify_child_added_or_removed(document, parent, child);
+	box_notify_child_added_or_removed(document, parent, child, false);
 	box_notify_new_parent(document, child, parent);
 }
 
@@ -687,7 +695,7 @@ void remove_all_children(Document *document, Box *parent)
 	}
 	parent->first_child = NULL;
 	parent->last_child = NULL;
-	box_notify_child_added_or_removed(document, parent, NULL);
+	box_notify_child_added_or_removed(document, parent, NULL, true);
 }
 
 Box *create_box(Document *document, Node *owner)
