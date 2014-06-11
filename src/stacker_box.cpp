@@ -387,7 +387,7 @@ inline bool sizes_equal(float a, float b)
 /* Activates the side of an axis size slot indicated by 'from_parent' if either
  * 1) the slot has not yet been modified this tick, or 2) 'from_parent' is
  * the primary side and the reserve side is currently active. Returns true if
- * the side indicated by 'from_parent' is now active. */
+ * the active side changed. */
 static bool activate_slot(const Document *document, Box *box, Axis axis, 
 	bool from_parent)
 {
@@ -399,7 +399,7 @@ static bool activate_slot(const Document *document, Box *box, Axis axis,
 	unsigned diff = ((unsigned(from_parent) ^ active) & mask);
 	box->flags ^= (diff * BOXFLAG_WIDTH_ACTIVE_ABOVE) << axis;
 	box->size_stamp[axis] = document->layout_clock;
-	return ((active ^ diff) & 1) != 0;
+	return (diff & 1) != 0;
 }
 
 /* Copies a size into one half of an axis size slot. */
@@ -612,22 +612,22 @@ bool set_provisional_size(Document *document, SizingPass pass, Box *box,
 	/* Is the constrained dimension different from the one stored? */
 	dim = apply_min_max(box, axis, dim);
 	float old = box->sizes[from_parent][axis];
-	bool changed = (box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0 || 
+	bool dim_changed = (box->flags & (BOXFLAG_WIDTH_DEFINED << axis)) == 0 || 
 		!sizes_equal(dim, old);
 
 	/* If an active size is being changed, mark the box for a visit to propagate 
 	 * the new size to dependent box axes. */
-	bool active = activate_slot(document, box, axis, from_parent);
-	if (changed) {
+	bool side_changed = activate_slot(document, box, axis, from_parent);
+	if (dim_changed) {
 		store_size(box, axis, dim, from_parent);
-		if (active)
+		if (side_changed)
 			active_size_changed(document, pass, box, axis);
 		lmsg("size change: pass: %d box: %s axis: %d, from_parent: %d, "
 			"old: %.2f new: %.2f active: %.2f\n", pass, 
 			get_box_debug_string(box), axis, from_parent, old, dim, 
 			get_active_size(box, axis));
 	}
-	return changed;
+	return dim_changed;
 }
 
 /* Sets the ideal or initial dimension of a box. For absolute modes this also
