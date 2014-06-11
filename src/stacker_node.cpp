@@ -2004,8 +2004,7 @@ void do_text_layout(Document *document, Node *node)
 	}
 
 	/* Do we need to redo paragraph layout? */
-	if ((node->flags & NFLAG_UPDATE_TEXT_LAYERS) == 0 &&
-		(container_box->flags & BOXFLAG_PARAGRAPH_VALID) != 0)
+	if ((container_box->flags & BOXFLAG_PARAGRAPH_VALID) != 0)
 		return;
 
 	/* Read paragraph style attributes. */

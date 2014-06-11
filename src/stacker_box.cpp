@@ -626,10 +626,10 @@ bool set_provisional_size(Document *document, SizingPass pass, Box *box,
 	/* If an active size is being changed, mark the box for a visit to propagate 
 	 * the new size to dependent box axes. */
 	bool side_changed = activate_slot(document, box, axis, from_parent);
+	if (side_changed || dim_changed)
+		active_size_changed(document, pass, box, axis);
 	if (dim_changed) {
 		store_size(box, axis, dim, from_parent);
-		if (side_changed)
-			active_size_changed(document, pass, box, axis);
 		lmsg("size change: pass: %d box: %s axis: %d, from_parent: %d, "
 			"old: %.2f new: %.2f active: %.2f\n", pass, 
 			get_box_debug_string(box), axis, from_parent, old, dim, 
