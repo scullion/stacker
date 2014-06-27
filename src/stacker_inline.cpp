@@ -1,5 +1,6 @@
 #include "stacker_inline.h"
 
+#include <algorithm>
 #include <numeric>
 
 #include "stacker_shared.h"
@@ -7,6 +8,7 @@
 #include "stacker_node.h"
 #include "stacker_document.h"
 #include "stacker_box.h"
+#include "stacker_layout.h"
 #include "stacker_paragraph.h"
 #include "stacker_layer.h"
 #include "stacker_platform.h"
@@ -292,7 +294,7 @@ CaretAddress caret_position(Document *document, const Box *box, float x)
 
 	/* If the box represents a block node, position the caret at offset zero or
 	 * one according to whether the query offset is left or right of centre. */
-	float dx = x - box->pos[AXIS_H];
+	float dx = x - box->axes[AXIS_H].pos;
 	if (address.node->layout == LAYOUT_BLOCK) {
 		float mid = 0.5f * outer_dim(box, AXIS_H);
 		address.ia.offset = dx < mid ? 0 : IA_END;
@@ -306,7 +308,7 @@ CaretAddress caret_position(Document *document, const Box *box, float x)
 
 	/* Iterate over the segments of the tokens the box positions to find the 
 	 * inline child the query point is within. */
-	float token_x0 = box->margin_lower[AXIS_H] + box->pad_lower[AXIS_H];
+	float token_x0 = box->axes[AXIS_H].margin_lower + box->axes[AXIS_H].pad_lower;
 	bool hit_token = false;
 	for (unsigned i = token_start; i != token_end && !hit_token; ++i) {
 		/* Is the query offset within this token? */
@@ -464,7 +466,7 @@ static void update_line_box_selection_layer(Document *document,
 	layer->pane.position.mode_size[AXIS_H] = DMODE_ABSOLUTE;
 	layer->pane.position.dims[AXIS_H] = sel_width;
 	layer->pane.position.mode_offset[AXIS_H] = DMODE_ABSOLUTE;
-	layer->pane.position.offsets[AXIS_H] = sel_x0 - line_box->pos[AXIS_H];
+	layer->pane.position.offsets[AXIS_H] = sel_x0 - line_box->axes[AXIS_H].pos;
 }
 
 /* Recreates selection highlight layers for an inline context. */
@@ -805,15 +807,12 @@ static void update_child_token_size(Document *document, Node *node,
 		 * that text, which has only just been performed. We need to compute the
 		 * size before building the element that represents the node in the 
 		 * parent's paragraph. */
-		compute_sizes_iteratively(document, PASS_POST_TEXT_LAYOUT, 
-			(Node *)token->child);
+		layout(document, ((Node *)token->child)->box);
 		/* Notice that the margins of the box are not included, because
 		 * inline container itself controls the margins of inline 
 		 * boxes. */
-		if ((box->flags & BOXFLAG_WIDTH_DEFINED) != 0)
-			token->width = padded_dim(box, AXIS_H);
-		if ((box->flags & BOXFLAG_HEIGHT_DEFINED) != 0)
-			token->height = padded_dim(box, AXIS_V);
+		token->width = padded_dim(box, AXIS_H);
+		token->height = padded_dim(box, AXIS_V);
 	}
 }
 
@@ -941,7 +940,7 @@ void rebuild_inline_context(Document *document, Node *node)
 	node->flags &= ~NFLAG_REBUILD_INLINE_CONTEXT;
 	node->flags |= NFLAG_REMEASURE_INLINE_TOKENS | NFLAG_UPDATE_TEXT_LAYERS;
 	if (node->box != NULL)
-		node->box->flags &= ~BOXFLAG_PARAGRAPH_VALID;
+		node->box->layout_flags &= ~BLFLAG_PARAGRAPH_VALID;
 }
 
 /* Makes a paragraph structure from the tokens of an inline context. */
@@ -1092,10 +1091,10 @@ static Box *create_multi_token_box(Document *document, Node *node,
 /* Helper to set the margins on a box inside an inline context. */
 static void set_text_box_spacing(Box *box, float space_before)
 {
-	box->mode_margin_lower[AXIS_H] = DMODE_ABSOLUTE;
-	box->mode_margin_upper[AXIS_H] = ADEF_UNDEFINED;
-	box->margin_lower[AXIS_H] = space_before;
-	box->margin_upper[AXIS_H] = 0.0f;
+	box->axes[AXIS_H].mode_margin_lower = DMODE_ABSOLUTE;
+	box->axes[AXIS_H].mode_margin_upper = ADEF_UNDEFINED;
+	box->axes[AXIS_H].margin_lower = space_before;
+	box->axes[AXIS_H].margin_upper = 0.0f;
 }
 
 /* Makes boxes to position contiguous runs of tokens in a line, applying spacing 
@@ -1175,7 +1174,7 @@ static unsigned build_line_text_boxes(Document *document, Node *node,
 /* Given a computed paragraph layout, makes the required number of line boxes,
  * puts the boxes for all inline tokens into the proper line box, and applies 
  * computed spacing to each token box. */
-void update_inline_boxes(Document *document, Node *node, 
+static void construct_boxes_from_paragraph(Document *document, Node *node, 
 	Justification justification, const Paragraph *paragraph, 
 	const ParagraphLine *lines, unsigned num_lines, float leading, 
 	float line_height)
@@ -1204,8 +1203,8 @@ void update_inline_boxes(Document *document, Node *node,
 
 		/* Add leading. */
 		if (i != 0) {
-			line_box->mode_margin_lower[AXIS_V] = DMODE_ABSOLUTE;
-			line_box->margin_lower[AXIS_V] = leading;
+			line_box->axes[AXIS_V].mode_margin_lower = DMODE_ABSOLUTE;
+			line_box->axes[AXIS_V].margin_lower = leading;
 		}
 
 		/* Make boxes to position the line's tokens. */
@@ -1221,6 +1220,53 @@ void update_inline_boxes(Document *document, Node *node,
 	}
 
 	node->flags |= NFLAG_UPDATE_TEXT_LAYERS;
+}
+
+/* Reconstructs the text boxes inside an inline container box. */
+void update_inline_boxes(Document *document, Box *box, float width)
+{
+	Node *node = box->owner;
+	
+	int line_width = round_signed(width);
+	
+	/* Read paragraph style attributes. */
+	Justification justification = (Justification)node->style.justification;
+	if (justification == ADEF_UNDEFINED)
+		justification = JUSTIFY_FLUSH;
+	int hanging_indent = node->style.hanging_indent;
+	float leading = node->style.leading < 0 ? 0.0f : (float)node->style.leading;
+	const FontMetrics *metrics = get_font_metrics(document->system, 
+		node->style.text.font_id);
+
+	/* Make a paragraph object. */
+	Paragraph paragraph;
+	paragraph_init(&paragraph, line_width);
+	build_paragraph(document, node, &paragraph, hanging_indent);
+
+	/* Break the paragraph into lines. */
+	ParagraphLine line_buffer[NUM_STATIC_PARAGRAPH_ELEMENTS], *lines = NULL;
+	unsigned num_lines = determine_breakpoints(&paragraph, &lines, 
+		line_buffer, NUM_STATIC_PARAGRAPH_ELEMENTS);
+	if ((document->flags & DOCFLAG_DEBUG_PARAGRAPHS) != 0) {
+		dump_paragraph(document, &paragraph);
+		dump_paragraph_lines(document, lines, num_lines);
+	}
+
+	/* Create a vertical box for each line and put the word boxes inside 
+	 * them. */
+	construct_boxes_from_paragraph(document, node, justification, &paragraph, lines,
+		num_lines, (float)leading, (float)metrics->height);
+
+	/* Deallocate the paragraph and any heap buffer used for to store lines. */
+	paragraph_clear(&paragraph);
+	if (lines != line_buffer)
+		delete [] lines;
+
+	/* No need to do paragraph layout again unless the container's width 
+	 * changes. */
+	box->layout_flags |= BLFLAG_PARAGRAPH_VALID;
+	if ((node->flags & NFLAG_IN_SELECTION_CHAIN) != 0)
+		node->flags |= NFLAG_UPDATE_SELECTION_LAYERS;
 }
 
 static const unsigned MAX_CONTEXT_TEXT_LAYERS = 16;

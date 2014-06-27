@@ -1,5 +1,7 @@
 #include "stacker_message.h"
 
+#include <algorithm>
+
 #include "stacker_document.h"
 #include "stacker_node.h"
 #include "stacker_util.h"
@@ -203,7 +205,7 @@ bool send_message(Document *document, Node *node, Message *message)
 		}
 		if (handled || handle_node_message(document, node, message))
 			message->flags |= MFLAG_HANDLED;
-		node = node->parent;
+		node = node->parent; 
 	}
 	if ((message->flags & MFLAG_PROPAGATE) != 0 && 
 		document_handle_message(document, message))

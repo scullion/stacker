@@ -4,6 +4,7 @@
 #include "stacker_message.h"
 #include "stacker_node.h"
 #include "stacker_box.h"
+#include "stacker_layout.h"
 #include "stacker_rule.h"
 #include "stacker_quadtree.h"
 #include "stacker_inline.h"
@@ -592,16 +593,10 @@ void update_document(Document *document)
 	if (!needs_update(document))
 		return;
 	document->layout_clock++;
-
-	if ((document->flags & DOCFLAG_DEBUG_FULL_LAYOUT) != 0)
-		clear_box_tree_flags(document, root->box, BOXFLAG_LAYOUT_MASK);
-
+	
 	bool rule_tables_changed = check_rule_tables(document);
 	update_nodes_pre_layout(document, root, 0, rule_tables_changed);
-	compute_sizes_iteratively(document, PASS_PRE_TEXT_LAYOUT, root);
-	do_text_layout(document, root);
-	compute_sizes_iteratively(document, PASS_POST_TEXT_LAYOUT, root);
-	compute_box_bounds(document, root->box);
+	layout(document, root->box);
 	update_nodes_post_layout(document, root);
 	update_box_clip(document, root->box, INFINITE_RECTANGLE, 0);
 	refresh_mouse_selection(document);

@@ -149,6 +149,7 @@ static void add_default_rules(System *system)
 	add_rule(NULL, system, NULL, "document", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
+	attributes[count++] = make_assignment(TOKEN_WIDTH, TOKEN_GROW, VSEM_TOKEN);
 	attributes[count++] = make_assignment(TOKEN_JUSTIFY, TOKEN_FLUSH, VSEM_TOKEN);
 	attributes[count++] = make_assignment(TOKEN_INDENT, TOKEN_AUTO, VSEM_TOKEN);
 	add_rule(NULL, system, NULL, "p", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
@@ -168,16 +169,19 @@ static void add_default_rules(System *system)
 	add_rule(NULL, system, NULL, "a:active", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
+	attributes[count++] = make_assignment(TOKEN_WIDTH, TOKEN_GROW, VSEM_TOKEN);
 	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, 2.5f, VSEM_NONE, AOP_MULTIPLY);
 	attributes[count++] = make_assignment(TOKEN_BOLD, true, VSEM_BOOLEAN);
 	add_rule(NULL, system, NULL, "h1", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
+	attributes[count++] = make_assignment(TOKEN_WIDTH, TOKEN_GROW, VSEM_TOKEN);
 	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, 2.0f, VSEM_NONE, AOP_MULTIPLY);
 	attributes[count++] = make_assignment(TOKEN_BOLD, true, VSEM_BOOLEAN);
 	add_rule(NULL, system, NULL, "h2", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);
 
 	count = 0;
+	attributes[count++] = make_assignment(TOKEN_WIDTH, TOKEN_GROW, VSEM_TOKEN);
 	attributes[count++] = make_assignment(TOKEN_FONT_SIZE, 1.5f, VSEM_NONE, AOP_MULTIPLY);
 	attributes[count++] = make_assignment(TOKEN_BOLD, true, VSEM_BOOLEAN);
 	add_rule(NULL, system, NULL, "h3", -1, attributes, count, RFLAG_ENABLED | RFLAG_GLOBAL, RULE_PRIORITY_LOWEST);

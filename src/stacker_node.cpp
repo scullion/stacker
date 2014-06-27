@@ -1766,8 +1766,10 @@ static void update_node_box_layers(Document *document, Node *node)
 	unsigned depth_interval = layer_chain_count_keys(VLCHAIN_BOX, box->layers);
 	if (depth_interval != box->depth_interval) {
 		box->depth_interval = (uint16_t)depth_interval;
-		box->flags &= ~BOXFLAG_TREE_CLIP_VALID;
-		clear_flag_in_parents(document, box, BOXFLAG_TREE_CLIP_VALID);
+		do {
+			box->layout_flags &= ~BLFLAG_TREE_CLIP_VALID;
+			box = box->parent;
+		} while (box != NULL);
 	}
 }
 
@@ -1970,90 +1972,6 @@ unsigned update_nodes_post_layout(Document *document, Node *node,
 		node->flags &= ~(NFLAG_WIDTH_CHANGED | NFLAG_HEIGHT_CHANGED);
 	}
 	return propagate_up;
-}
-
-/* Disable initialization of large stack arrays which makes debug builds 
- * very slow. */
-#pragma runtime_checks("", off)
-
-/* A second box building pass that constructs line boxes for paragraphs and
- * performs paragraph layout. This has to be done in a second pass because the 
- * number of line boxes required depends on the final size of the paragraphs. */
-void do_text_layout(Document *document, Node *node)
-{
-	/* Visit children in preorder. */
-	for (Node *child = node->first_child; child != NULL; 
-		child = child->next_sibling)
-		do_text_layout(document, child);
-	if (node->layout != LAYOUT_INLINE_CONTAINER)
-		return;
-
-	/* Determine the paragraph width. We use width -1, meaning "no breaking"
-	 * if the parent's width is undefined; the parent's width may then be 
-	 * determined by the total width of the unbroken text. Line breaking also
-	 * doesn't make much sense if the container is a horizontal box, because
-	 * the "lines" will just be placed next to each other horizontally, so we
-	 * only want a single line in that case too. */
-	Box *container_box = node->box;
-	ensure(container_box != NULL);
-	int line_width = UNBOUNDED_LINE_WIDTH;
-	if (container_box->axis == AXIS_V && (container_box->flags & 
-		BOXFLAG_WIDTH_DEFINED) != 0) {
-		float dim = get_size_directional(container_box, AXIS_H, true);
-		line_width = (unsigned)round_signed(dim);
-	}
-
-	/* Do we need to redo paragraph layout? */
-	if ((container_box->flags & BOXFLAG_PARAGRAPH_VALID) != 0)
-		return;
-
-	/* Read paragraph style attributes. */
-	Justification justification = (Justification)node->style.justification;
-	if (justification == ADEF_UNDEFINED)
-		justification = JUSTIFY_FLUSH;
-	int hanging_indent = node->style.hanging_indent;
-	float leading = node->style.leading < 0 ? 0.0f : (float)node->style.leading;
-	const FontMetrics *metrics = get_font_metrics(document->system, 
-		node->style.text.font_id);
-
-	/* Make a paragraph object. */
-	Paragraph paragraph;
-	paragraph_init(&paragraph, line_width);
-	build_paragraph(document, node, &paragraph, hanging_indent);
-
-	/* Break the paragraph into lines. */
-	ParagraphLine line_buffer[NUM_STATIC_PARAGRAPH_ELEMENTS], *lines = NULL;
-	unsigned num_lines = determine_breakpoints(&paragraph, &lines, 
-		line_buffer, NUM_STATIC_PARAGRAPH_ELEMENTS);
-	if ((get_flags(document) & DOCFLAG_DEBUG_PARAGRAPHS) != 0) {
-		dump_paragraph(document, &paragraph);
-		dump_paragraph_lines(document, lines, num_lines);
-	}
-
-	/* Create a vertical box for each line and put the word boxes inside 
-	 * them. */
-	update_inline_boxes(document, node, justification, &paragraph, lines,
-		num_lines, (float)leading, (float)metrics->height);
-
-	/* Deallocate the paragraph and any heap buffer used for to store lines. */
-	paragraph_clear(&paragraph);
-	if (lines != line_buffer)
-		delete [] lines;
-
-	/* No need to do paragraph layout again unless the container's width 
-	 * changes. */
-	container_box->flags |= BOXFLAG_PARAGRAPH_VALID;
-	if ((node->flags & NFLAG_IN_SELECTION_CHAIN) != 0)
-		node->flags |= NFLAG_UPDATE_SELECTION_LAYERS;
-}
-
-/* Iteratively computes box sizes. */
-void compute_sizes_iteratively(Document *document, SizingPass pass, Node *root)
-{
-	unsigned repetitions = 0;
- 	for (repetitions = 0; repetitions < 10; ++repetitions)
-		if (compute_box_sizes(document, pass, root->box))
-			break;
 }
 
 } // namespace stkr

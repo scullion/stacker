@@ -505,6 +505,12 @@ static int validate_integer(int name, ValueSemantic vs, int value,
 				mode = unsigned(value) > 100 ? 
 					STKR_OUT_OF_BOUNDS : DMODE_FRACTIONAL;
 			}
+			if (vs == VSEM_TOKEN) {
+				if (value == TOKEN_GROW)
+					mode = DMODE_GROW;
+				else if (value == TOKEN_SHRINK)
+					mode = DMODE_SHRINK;
+			}
 			/*  Fall through. */
 		case ASEM_ABSOLUTE_DIMENSION:
 			if (vs == VSEM_TOKEN && value == TOKEN_AUTO)

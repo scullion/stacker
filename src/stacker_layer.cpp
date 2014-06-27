@@ -11,6 +11,7 @@
 #include "stacker_document.h"
 #include "stacker_system.h"
 #include "stacker_box.h"
+#include "stacker_layout.h"
 #include "stacker_platform.h"
 
 #include "url_cache.h"
@@ -65,7 +66,7 @@ void compute_layer_position(const Box *box, const LayerPosition *lp,
 {
 	/* Get the positioning reference box. */
 	float ref[4], box_dims[2], specified_dims[2], offsets[2], defaults[2];	
-	get_bounding_box_rectangle(box, (BoundingBox)lp->placement, ref);
+	bounding_box_rectangle(box, (BoundingBox)lp->placement, ref);
 	
 	/* Resolve fractional offsets and sizes relative to the container. */
 	if (use_natural) {
@@ -444,7 +445,7 @@ void set_box_dimensions_from_layer(Document *document, Box *box, VisualLayer *la
 		&image_dims[0],  &image_dims[1]))
 		return;
 	for (unsigned axis = 0; axis < 2; ++axis) {
-		if (box->mode_dim[axis] <= DMODE_AUTO) {
+		if (box->axes[axis].mode_dim <= DMODE_AUTO) {
 			set_ideal_size(document, box, (Axis)axis, DMODE_ABSOLUTE,
 				(float)image_dims[axis]);
 		}

@@ -153,73 +153,44 @@ void dump_boxes(const Document *document, const Box *box, unsigned indent)
 	/* Print debug information. */
 	dmsg( 
 		"% *sBox "
-		"[%s] node=%s axis=%d children=%d "
+		"[%s] node: %s axis: %d children: %d "
 		"\n% *s    | "
-		"ideal=(%.2f/%d, %.2f/%d) "
-		"sizes_from_child=(%.2f, %.2f) sizes_from_parent=(%.2f, %.2f) "
-		"pos=(%.2f, %.2f) "
-		"clip=(%.2f, %.2f, %.2f, %.2f) "
+		"ideal: (%.2f/%d, %.2f/%d) "
+		"extrinsic: (%.2f, %.2f) "
+		"intrinsic: (%.2f, %.2f), "
+		"preferred: (%.2f, %.2f), "
 		"\n% *s    | "
-		"mm_x=(%.2f/%d, %.2f/%d), "
-		"mm_y=(%.2f/%d, %.2f/%d), "
-		"align=%d, arrange=%d, "
-		"pad=(%.2f/%d, %.2f/%d, %.2f/%d, %.2f/%d) "
-		"mrg=(%.2f/%d, %.2f/%d, %.2f/%d, %.2f/%d)"
+		"pos: (%.2f, %.2f) "
+		"clip: (%.2f, %.2f, %.2f, %.2f) "
 		"\n% *s    | "
-		"cell_code=%.8Xh, "
-		"primary_slot=(%u, %u), "
-		"active_slot=(%u, %u), "
+		"mm_x: (%.2g/%d, %.2g/%d), "
+		"mm_y: (%.2g/%d, %.2g/%d), "
+		"align: %d, arrange: %d, "
+		"pad: (%.2f/%d, %.2f/%d, %.2f/%d, %.2f/%d) "
+		"mrg: (%.2f/%d, %.2f/%d, %.2f/%d, %.2f/%d)"
 		"\n% *s    | "
-		"size_children[pre_text_layout]=(major: %u, minor: %u), "
-		"size_children[post_text_layout]=(major: %u, minor: %u), "
-		"\n% *s    | "
-		"size_from_children[pre_text_layout]=(%u, %u), "
-		"size_from_children[post_text_layout]=(%u, %u), "
-		"\n% *s    | "
-		"size_from_parent[pre_text_layout]=(%u, %u), "
-		"size_from_parent[post_text_layout]=(%u, %u), "
-		"\n% *s    | "
-		"tokens=(%d, %d)"
+		"cell_code: %.8Xh, "
+		"tokens: (%d, %d)"
 		"\n", 
 		indent, "", get_box_debug_string(box), node_name, (int)box->axis, num_children,
 		indent, "",
-		box->ideal[AXIS_H], (int)box->mode_dim[AXIS_H], box->ideal[AXIS_V], (int)box->mode_dim[AXIS_V],
-		get_size_directional(box, AXIS_H, false), 
-		get_size_directional(box, AXIS_V, false),
-		get_size_directional(box, AXIS_H, true), 
-		get_size_directional(box, AXIS_V, true),
-		box->pos[AXIS_H], box->pos[AXIS_V],
+		box->axes[AXIS_H].sizes[SSLOT_IDEAL], (int)box->axes[AXIS_H].mode_dim, box->axes[AXIS_V].sizes[SSLOT_IDEAL], (int)box->axes[AXIS_V].mode_dim,
+		box->axes[AXIS_H].sizes[SSLOT_EXTRINSIC], box->axes[AXIS_V].sizes[SSLOT_EXTRINSIC],
+		box->axes[AXIS_H].sizes[SSLOT_INTRINSIC], box->axes[AXIS_V].sizes[SSLOT_INTRINSIC],
+		box->axes[AXIS_H].sizes[SSLOT_PREFERRED], box->axes[AXIS_V].sizes[SSLOT_PREFERRED],
+		indent, "",
+		box->axes[AXIS_H].pos, box->axes[AXIS_V].pos,
 		box->clip[0], box->clip[1], box->clip[2], box->clip[3],
 		indent, "",
-		box->min[AXIS_H], (int)box->mode_min[AXIS_H], box->max[AXIS_H], (int)box->mode_max[AXIS_H],
-		box->min[AXIS_V], (int)box->mode_min[AXIS_V], box->max[AXIS_V], (int)box->mode_max[AXIS_V],
+		box->axes[AXIS_H].min, (int)box->axes[AXIS_H].mode_min, box->axes[AXIS_H].max, (int)box->axes[AXIS_H].mode_max,
+		box->axes[AXIS_V].min, (int)box->axes[AXIS_V].mode_min, box->axes[AXIS_V].max, (int)box->axes[AXIS_V].mode_max,
 		(int)box->alignment, (int)box->arrangement,
-		box->pad_lower[AXIS_H], box->mode_pad_lower[AXIS_H], box->pad_lower[AXIS_V], box->mode_pad_lower[AXIS_V],
-		box->pad_upper[AXIS_H], box->mode_pad_upper[AXIS_H], box->pad_upper[AXIS_V], box->mode_pad_upper[AXIS_V],
-		box->margin_lower[AXIS_H], box->mode_margin_lower[AXIS_H], box->margin_lower[AXIS_V], box->mode_margin_lower[AXIS_V],
-		box->margin_upper[AXIS_H], box->mode_margin_upper[AXIS_H], box->margin_upper[AXIS_V], box->mode_margin_upper[AXIS_V],
+		box->axes[AXIS_H].pad_lower, box->axes[AXIS_H].mode_pad_lower, box->axes[AXIS_V].pad_lower, box->axes[AXIS_V].mode_pad_lower,
+		box->axes[AXIS_H].pad_upper, box->axes[AXIS_H].mode_pad_upper, box->axes[AXIS_V].pad_upper, box->axes[AXIS_V].mode_pad_upper,
+		box->axes[AXIS_H].margin_lower, box->axes[AXIS_H].mode_margin_lower, box->axes[AXIS_V].margin_lower, box->axes[AXIS_V].mode_margin_lower,
+		box->axes[AXIS_H].margin_upper, box->axes[AXIS_H].mode_margin_upper, box->axes[AXIS_V].margin_upper, box->axes[AXIS_V].mode_margin_upper,
 		indent, "",
-		box->cell_code,
-		(box->flags & BOXFLAG_WIDTH_PRIMARY_ABOVE) != 0,
-		(box->flags & BOXFLAG_HEIGHT_PRIMARY_ABOVE) != 0,
-		(box->flags & BOXFLAG_WIDTH_ACTIVE_ABOVE) != 0,
-		(box->flags & BOXFLAG_HEIGHT_ACTIVE_ABOVE) != 0,
-		indent, "",
-		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_SIZE_CHILDREN_MAJOR) != 0,
-		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_SIZE_CHILDREN_MINOR) != 0,
-		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_SIZE_CHILDREN_MAJOR) != 0,
-		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_SIZE_CHILDREN_MINOR) != 0,
-		indent, "",
-		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN) != 0,
-		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN) != 0,
-		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_COMPUTE_WIDTH_FROM_CHILDREN) != 0,
-		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_COMPUTE_HEIGHT_FROM_CHILDREN) != 0,
-		indent, "",
-		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_COMPUTE_WIDTH_FROM_PARENT) != 0,
-		(box->pass_flags[PASS_PRE_TEXT_LAYOUT] & PASSFLAG_COMPUTE_HEIGHT_FROM_PARENT) != 0,
-		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_COMPUTE_WIDTH_FROM_PARENT) != 0,
-		(box->pass_flags[PASS_POST_TEXT_LAYOUT] & PASSFLAG_COMPUTE_HEIGHT_FROM_PARENT) != 0,
-		indent, "",
+		box->cell_code, 
 		box->token_start, box->token_end
 	);
 
@@ -228,7 +199,6 @@ void dump_boxes(const Document *document, const Box *box, unsigned indent)
 		child != NULL; child = child->next_sibling)
 		dump_boxes(document, child, indent + 4);
 }
-
 
 } // namespace stkr
 

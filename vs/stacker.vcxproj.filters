@@ -73,6 +73,9 @@
     <ClCompile Include="..\src\stacker_attribute_buffer.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\stacker_layout.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\stacker.h">
@@ -151,6 +154,9 @@
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\src\stacker_attribute_buffer.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_layout.h">
       <Filter>src</Filter>
     </ClInclude>
   </ItemGroup>

@@ -6,6 +6,8 @@
 #include <cctype>
 #include <cassert>
 
+#include <algorithm>
+
 #include "url_cache.h"
 
 #pragma warning(disable: 4505) // unreferenced local function has been removed

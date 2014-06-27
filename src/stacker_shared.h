@@ -18,12 +18,12 @@ namespace stkr {
 #endif
 
 // #define ensure(p) ((p) ? (void)0 : abort())
-#pragma warning(disable: 4127) // conditional expression is constant
 #define ensure(p) if (!(p)) { __asm { int 3 }; exit(1); }
+#pragma warning(disable: 4127) // conditional expression is constant
 #if defined(NDEBUG)
 	#define assertb(p)
 #else
-	#define assertb(p) ensure(p)
+	#define assertb(p) if (!(p)) { __asm { int 3 }; }
 #endif
 
 #define docmsgp(flag, fmt, ...) if (get_flags(document) & flag) document_dump(document, (fmt), __VA_ARGS__);

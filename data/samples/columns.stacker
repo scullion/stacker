@@ -1,6 +1,6 @@
 <rule match=".column" width=33.33% font-size=18 pad=32 background=rgb(24, 24, 24) color=rgb(224, 224, 224) />
 	
-<hbox>
+<hbox width=grow>
 	<p class="column">
 		In olden times when wishing still helped one, there lived a king whose daughters were all beautiful;
 		and the youngest was so beautiful that the sun itself, which has seen so much, was astonished

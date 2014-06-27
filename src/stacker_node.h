@@ -121,7 +121,6 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 unsigned update_nodes_post_layout(Document *document, Node *node, 
 	unsigned propagate_down = 0);
 void do_text_layout(Document *document, Node *node);
-void compute_sizes_iteratively(Document *document, SizingPass pass, Node *root);
 
 void set_interaction_state(Document *document, Node *node, 
 	unsigned mask, bool value);

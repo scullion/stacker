@@ -201,6 +201,8 @@ bool is_enum_token(int token)
 		case TOKEN_START:
 		case TOKEN_MIDDLE:
 		case TOKEN_END:
+		case TOKEN_GROW:
+		case TOKEN_SHRINK:
 		case TOKEN_LEFT:
 		case TOKEN_RIGHT:
 		case TOKEN_TOP:

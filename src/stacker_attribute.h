@@ -115,6 +115,8 @@ enum FlagMode {
 /* How a dimension attribute's value should be interpreted. */
 enum DimensionMode {
 	DMODE_AUTO = ADEF_DEFINED,
+	DMODE_GROW,
+	DMODE_SHRINK,
 	DMODE_ABSOLUTE,
 	DMODE_FRACTIONAL,
 	DMODE_LAST

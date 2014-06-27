@@ -161,10 +161,7 @@ VisualLayer *build_text_layer_stack(Document *document, Node *node);
 void update_inline_selection_layers(Document *document, Node *node);
 void build_paragraph(Document *document, Node *node, Paragraph *p, 
 	int hanging_indent);
-void update_inline_boxes(Document *document, Node *node, 
-	Justification justification, const Paragraph *paragraph, 
-	const ParagraphLine *lines, unsigned num_lines, float leading, 
-	float line_height);
+void update_inline_boxes(Document *document, Box *box, float width);
 
 extern const InternalAddress INLINE_START;
 extern const InternalAddress INLINE_END;
