@@ -16,20 +16,17 @@
 
 namespace stkr {
 
-extern const InternalAddress INLINE_START = { 0, 0 };
-extern const InternalAddress INLINE_END = { IA_END, IA_END };
-
 /* Returns the caret address before a node. */
-CaretAddress caret_start(const Document *document, const Node *node)
+CaretAddress start_address(const Document *document, const Node *node)
 {
-	CaretAddress address = { node, INLINE_START };
+	CaretAddress address = { node, 0 };
 	return canonical_address(document, address);
 }
 
 /* Returns the caret address after a node. */
-CaretAddress caret_end(const Document *document, const Node *node)
+CaretAddress end_address(const Document *document, const Node *node)
 {
-	CaretAddress address = { node, INLINE_END };
+	CaretAddress address = { node, IA_END };
 	return canonical_address(document, address);
 }
 
@@ -40,49 +37,34 @@ CaretAddress canonical_address(const Document *document, CaretAddress address)
 {
 	const Node *node = address.node;
 	if (node != NULL) {
-		const Node *container = find_inline_container(document, node);
+		const Node *container = find_inline_container_not_self(document, node);
 		if (container != NULL) {
 			address.node = container;
-			address.ia = inline_before(container->inline_context, node);
+			address.offset = inline_before(container->icb, node);
 		}
 	}
 	return address;
 }
 
-
-unsigned inline_token_index(const InlineContext *icb, unsigned token)
+unsigned inline_element_index(const InlineContext *icb, unsigned element)
 {
-	/* Note that if num_tokens is zero here, it wraps around to IA_END. */
-	return (token == IA_END) ? icb->num_tokens - 1 : token;
+	/* Note that if num_elements is zero here, the result wraps around to 
+	 * IA_END. */
+	return (element == IA_END) ? icb->num_elements - 1 : element;
 }
 
-const InlineToken *inline_token(const InlineContext *icb, unsigned index)
+ParagraphElement inline_element(const InlineContext *icb, unsigned index)
 {
-	index = inline_token_index(icb, index);
-	return index < icb->num_tokens ? icb->tokens + index : NULL;
+	index = inline_element_index(icb, index);
+	return index < icb->num_elements ? icb->elements[index] : 0;
 }
 
-/* Converts the IA_END constants in an internal address to actual numbers
- * given the current state of the node. */
-InternalAddress expand_internal_address(const Node *node, InternalAddress ia)
+/* True if two internal addreses refer to the same position. */
+bool same_internal_address(const Node *node, unsigned a, unsigned b)
 {
-	if (node->layout == LAYOUT_INLINE_CONTAINER) {
-		const InlineContext *icb = node->inline_context;
-		ia.token = inline_token_index(icb, ia.token);
-		if (ia.offset == IA_END && ia.token != IA_END)
-			ia.offset = icb->tokens[ia.token].end - icb->tokens[ia.token].start;
-	}
-	return ia;
-}
-
-/* True if two internal addreses refer to the same position given the current
- * state of a node. */
-bool same_internal_address(const Node *node, const InternalAddress a, 
-	const InternalAddress b)
-{
-	InternalAddress ea = expand_internal_address(node, a);
-	InternalAddress eb = expand_internal_address(node, b);
-	return ea.token == eb.token && ea.offset == eb.offset;
+	unsigned ea = inline_element_index(node, a);
+	unsigned eb = inline_element_index(node, b);
+	return ea == eb;
 }
 
 /* Returns the index of the first token in an inline container with the 
@@ -96,38 +78,21 @@ unsigned inline_find_child_token(const InlineContext *icb, const Node *child)
 	return IA_END;
 }
 
-InternalAddress inline_before(const InlineContext *icb, const Node *child)
+unsigned inline_before(const InlineContext *icb, const Node *child)
 {
-	InternalAddress ia;
-	ia.token = inline_find_child_token(icb, child);
-	ia.offset = 0;
-	return ia;
+	return child->first_element;
 }
 
-InternalAddress inline_after(const InlineContext *icb, const Node *child)
+unsigned inline_after(const InlineContext *icb, const Node *child)
 {
-	InternalAddress ia;
-	ia.token = inline_find_child_token(icb, child);
-	ia.offset = IA_END;
-	return ia;
-}
-
-/* Converts a (token, offset) address to an offset into the ICB's text buffer. */
-static unsigned address_to_icb_offset(const InlineContext *icb, 
-	const InternalAddress ia)
-{
-	if (ia.token == IA_END)
-		return icb->text_length;
-	return ia.offset != IA_END ? 
-		icb->tokens[ia.token].start + ia.offset : 
-		icb->tokens[ia.token].end;
+	return child->first_element + child->text_length;
 }
 
 static InternalAddress closer_end(const Node *node, InternalAddress ia, 
 	AddressRewriteMode mode)
 {
 	if (node->layout == LAYOUT_INLINE_CONTAINER) {
-		const InlineContext *icb = node->inline_context;
+		const InlineContext *icb = node->icb;
 		bool after;
 		if (mode == ARW_TIES_TO_CLOSER) {
 			unsigned icb_offset = address_to_icb_offset(icb, ia);
@@ -150,10 +115,10 @@ CaretAddress rewrite_address(const Document *document, const Node *parent,
 {
 	while (address.node != NULL && address.node != parent) {
 		address.ia = closer_end(address.node, address.ia, mode);
-		const Node *container = find_inline_container(document, address.node);
+		const Node *container = find_inline_container_not_self(document, address.node);
 		if (container != NULL) {
 			address.ia.token = inline_find_child_token(
-				container->inline_context, address.node);
+				container->icb, address.node);
 			address.node = container;
 		} else {
 			address.node = address.node->parent;
@@ -181,9 +146,9 @@ InternalAddress closest_internal_address(const Document *document,
 	 * 'address.node', and the result is whichever end of 'node' is closer
 	 * to the address. */
 	CaretAddress a0_wrt_b = rewrite_address(document, address.node, 
-		caret_start(document, node), mode);
+		start_address(document, node), mode);
 	CaretAddress a1_wrt_b = rewrite_address(document, address.node, 
-		caret_end(document, node), mode);
+		end_address(document, node), mode);
 	if (a0_wrt_b.node != NULL) {
 		InternalAddress ia_a0 = expand_internal_address(node, a0_wrt_b.ia);
 		InternalAddress ia_a1 = expand_internal_address(node, a1_wrt_b.ia);
@@ -202,9 +167,18 @@ InternalAddress closest_internal_address(const Document *document,
 
 const Node *inline_node_at(const InlineContext *icb, InternalAddress ia)
 {
-	const InlineToken *token = inline_token(icb, ia.token);
+	const InlineToken *token = inline_element(icb, ia.token);
 	return token != NULL ? token->child : NULL;
 }
+
+/* FIXME (TJM): maybe define internal addresses as (child, offset). not like
+ * it's any more  fragile than what we do now, since tokens get rebuilt if the
+ * children change at all. 
+ * 
+ * why not just use CaretPosition everywhere instead? that's already (node, offset). seems more natural now.
+ * 
+ * currently the way we use style segments is to just iterate over all tokens, then each style segment within a token.
+ * we don't have tokens any more. */
 
 /* Returns the node containing a caret address. This is different from the 
  * 'node' field in the address structure, which will contain the inline 
@@ -213,7 +187,7 @@ const Node *node_at_caret(CaretAddress address)
 {
 	const Node *node = address.node;
 	if (node != NULL && node->layout == LAYOUT_INLINE_CONTAINER)
-		node = inline_node_at(node->inline_context, address.ia);
+		node = inline_node_at(node->icb, address.ia);
 	return node;
 }
 
@@ -223,10 +197,10 @@ bool is_fully_selected(const Document *document, const Node *node)
 	if ((node->flags & NFLAG_IN_SELECTION_CHAIN) == 0)
 		return false;
 	if (node->layout != LAYOUT_INLINE_CONTAINER)
-		return node->first_child == NULL || 
+		return node->t.first == NULL || 
 			is_fully_selected(document, node->first_child) && 
 			is_fully_selected(document, node->last_child);
-	const InlineContext *icb = node->inline_context;
+	const InlineContext *icb = node->icb;
 	return same_internal_address(node, icb->selection_start, INLINE_START) && 
 		same_internal_address(node, icb->selection_end, INLINE_END);
 }
@@ -247,7 +221,7 @@ Node *cwalk_first(Document *document, CaretWalker *w, CaretAddress start,
 	if (w->back == w->node)
 		w->back = NULL;
 	w->mask = mask;
-	w->node->flags |= mask;
+	w->node->t.flags |= mask;
 	return w->node;
 }
 
@@ -259,15 +233,15 @@ Node *cwalk_next(Document *document, CaretWalker *w)
 	if (w->back != NULL) {
 		w->node = w->back;
 		w->back = NULL;
-	} else if (w->node->first_child != NULL && 
-		(w->node->first_child->flags & w->mask) == 0) {
-		w->node = w->node->first_child;
-	} else if (w->node->next_sibling != NULL && 
-		(w->node->next_sibling->flags & w->mask) == 0) {
-		w->node = w->node->next_sibling;
+	} else if (w->node->t.first != NULL && 
+		(w->node->t.first->flags & w->mask) == 0) {
+		w->node = w->node->t.first.node;
+	} else if (w->node->t.next != NULL && 
+		(w->node->t.next->flags & w->mask) == 0) {
+		w->node = w->node->t.next.node;
 		/* If the current node is an inline child, make sure we've visited
 		 * its parent before moving on to the next sibling. */
-		Node *container = (Node *)find_inline_container(document, w->node);
+		Node *container = (Node *)find_inline_container_not_self(document, w->node);
 		if (container != NULL && (container->flags & w->mask) == 0) {
 			w->back = w->node;
 			w->node = container;
@@ -288,7 +262,7 @@ Node *cwalk_next(Document *document, CaretWalker *w)
 CaretAddress caret_position(Document *document, const Box *box, float x)
 {
 	CaretAddress address = { NULL, 0, 0 };
-	address.node = find_context_node(document, box->owner);
+	address.node = find_layout_node(document, box->node);
 	if (address.node == NULL)
 		return address;
 
@@ -302,7 +276,7 @@ CaretAddress caret_position(Document *document, const Box *box, float x)
 	}
 
 	/* The box is part of an inline context. */
-	const InlineContext *icb = address.node->inline_context;
+	const InlineContext *icb = address.node->icb;
 	unsigned token_start = box->token_start;
 	unsigned token_end = box->token_end;
 
@@ -374,12 +348,12 @@ static bool selection_interval(const Document *document, const Node *node,
 	unsigned token_start, unsigned token_end, float *sel_x0, float *sel_x1)
 {
 	assertb(node->layout == LAYOUT_INLINE_CONTAINER);
-	const InlineContext *icb = node->inline_context;
+	const InlineContext *icb = node->icb;
 
 	/* Does the token intersect with the ICB's selection? Note that j is the
 	 * token where the selection ends, so [i, j] is an open interval. */
-	unsigned i = inline_token_index(icb, icb->selection_start.token);
-	unsigned j = inline_token_index(icb, icb->selection_end.token);
+	unsigned i = inline_element_index(icb, icb->selection_start.token);
+	unsigned j = inline_element_index(icb, icb->selection_end.token);
 	if (!overlap(token_start, token_end, i, j + 1))
 		return false;
 
@@ -430,13 +404,13 @@ static void update_line_box_selection_layer(Document *document,
 	 * draw the selection box. */
 	const Node *container = find_chain_inline_container(document, node);
 	bool selected_in_parent = container != NULL && 
-		(container->flags & NFLAG_IN_SELECTION_CHAIN) != 0 &&
+		(container->t.flags & NFLAG_IN_SELECTION_CHAIN) != 0 &&
 		is_fully_selected(document, node);
 
 	/* Determine the selection interval. */
 	bool layer_required = false;
 	float sel_x0 = 0.0f, sel_x1 = 0.0f;
-	if (!selected_in_parent && (node->flags & NFLAG_IN_SELECTION_CHAIN) != 0) {
+	if (!selected_in_parent && (node->t.flags & NFLAG_IN_SELECTION_CHAIN) != 0) {
 		unsigned token_start, token_end;
 		if (line_box_token_range(line_box, &token_start, &token_end)) {
 			layer_required = selection_interval(document, node, 
@@ -472,9 +446,9 @@ static void update_line_box_selection_layer(Document *document,
 /* Recreates selection highlight layers for an inline context. */
 void update_inline_selection_layers(Document *document, Node *node)
 {
-	Box *container = node->box;
-	for (Box *line_box = container->first_child; line_box != NULL; 
-		line_box = line_box->next_sibling) {
+	Box *container = node->t.counterpart.box;
+	for (Box *line_box = first_child_box(container); line_box != NULL; 
+		line_box = line_box->t.next.box) {
 		update_line_box_selection_layer(document, node, line_box);
 	}
 }
@@ -693,7 +667,7 @@ float token_character_position(const Document *document,
 {
 	document;
 
-	const InlineContext *icb = node->inline_context;
+	const InlineContext *icb = node->icb;
 
 	/* Calculate the L.H.S. position of the token within its run by adding up
 	 * the widths of preceding tokens until we reach the first token positioned
@@ -733,9 +707,9 @@ float token_character_position(const Document *document,
 static void apply_selection_to_style_segment(const Document *document, 
 	const Node *node, TextStyleSegment *ss)
 {
-	if ((node->flags & NFLAG_IN_SELECTION_CHAIN) == 0)
+	if ((node->t.flags & NFLAG_IN_SELECTION_CHAIN) == 0)
 		return;
-	const InlineContext *icb = node->inline_context;
+	const InlineContext *icb = node->icb;
 	unsigned sel_start = address_to_icb_offset(icb, icb->selection_start);
 	unsigned sel_end = address_to_icb_offset(icb, icb->selection_end);
 	if (ss->segment.start < sel_start && ss->segment.end > sel_start) {
@@ -819,7 +793,7 @@ static void update_child_token_size(Document *document, Node *node,
 /* Updates the size of each token in an inline context. */
 void measure_inline_tokens(Document *document, Node *node, bool use_positioning)
 {	
-	InlineContext *icb = node->inline_context;
+	InlineContext *icb = node->icb;
 	int16_t measure_font_id = INVALID_FONT_ID;
 	unsigned measure_start = 0, measure_end = 0;
 	unsigned measure_height = 0;
@@ -874,17 +848,17 @@ void measure_inline_tokens(Document *document, Node *node, bool use_positioning)
 			update_child_token_size(document, node, token);
 		}
 	}
-	node->flags &= ~NFLAG_REMEASURE_INLINE_TOKENS;
+	node->t.flags &= ~NFLAG_REMEASURE_INLINE_TOKENS;
 }
 
 /* Destroys a node's inline context. */
 void destroy_inline_context(Document *document, Node *node)
 {
-	InlineContext *ctx = node->inline_context;
+	InlineContext *ctx = node->icb;
 	if (ctx != NULL) {
 		destroy_owner_chain(document, ctx->text_boxes, false);
 		delete [] (char *)ctx;
-		node->inline_context = NULL;
+		node->icb = NULL;
 	}
 }
 
@@ -913,7 +887,7 @@ void rebuild_inline_context(Document *document, Node *node)
 	bytes_required += tt.text_length * sizeof(char); // Text.
 	bytes_required += tt.text_length * sizeof(unsigned); // Offsets.
 	bytes_required += tt.num_tokens * sizeof(InlineToken); // Tokens.
-	delete [] (char *)node->inline_context;
+	delete [] (char *)node->icb;
 	char *block = new char[bytes_required];
 	InlineContext *icb = (InlineContext *)block;
 	block += sizeof(InlineContext);
@@ -935,12 +909,12 @@ void rebuild_inline_context(Document *document, Node *node)
 		icb->text, icb->tokens);
 	itok_tokenize(&tt);
 
-	node->inline_context = icb;
+	node->icb = icb;
 
-	node->flags &= ~NFLAG_REBUILD_INLINE_CONTEXT;
-	node->flags |= NFLAG_REMEASURE_INLINE_TOKENS | NFLAG_UPDATE_TEXT_LAYERS;
+	node->t.flags &= ~NFLAG_RECONSTRUCT_PARAGRAPH;
+	node->t.flags |= NFLAG_REMEASURE_INLINE_TOKENS | NFLAG_UPDATE_TEXT_LAYERS;
 	if (node->box != NULL)
-		node->box->layout_flags &= ~BLFLAG_PARAGRAPH_VALID;
+		node->box->layout_flags &= ~BLFLAG_TEXT_VALID;
 }
 
 /* Makes a paragraph structure from the tokens of an inline context. */
@@ -948,9 +922,9 @@ void build_paragraph(Document *document, Node *node, Paragraph *p,
 	int hanging_indent)
 {
 	/* We must have an up-to-date ICB. */
-	assertb((node->flags & (NFLAG_REBUILD_INLINE_CONTEXT | 
+	assertb((node->t.flags & (NFLAG_RECONSTRUCT_PARAGRAPH | 
 		NFLAG_REMEASURE_INLINE_TOKENS)) == 0);
-	InlineContext *icb = node->inline_context;
+	InlineContext *icb = node->icb;
 
 	WhiteSpaceMode mode = (WhiteSpaceMode)node->style.white_space_mode;
 
@@ -996,14 +970,14 @@ void build_paragraph(Document *document, Node *node, Paragraph *p,
 			} else if (hanging_indent != 0) {
 				if (hanging_indent < 0)
 					hanging_indent = (int)metrics->paragraph_indent_width;
-				paragraph_append(p, PET_BOX, (uint32_t)hanging_indent, 
+				paragraph_append(p, PET_TEXT, (uint32_t)hanging_indent, 
 					0, 0, 0, true, false);
 			}
 		}
 
 		/* Add the token's box. */
 		if (token->type != TTT_BREAK) {
-			paragraph_append(p, PET_BOX, round_signed(token->width), 
+			paragraph_append(p, PET_TEXT, round_signed(token->width), 
 				0, 0, 0, false, true);
 			token->flags |= ITF_HAS_PARAGRAPH_BOX;
 		} else {
@@ -1039,7 +1013,7 @@ static unsigned compute_token_spaces(Justification justification,
 	float space = 0.0f;
 	for (unsigned i = line->a; i != line->b; ++i) {
 		ParagraphElement e = p->elements[i];
-		if (e.type == PET_BOX) {
+		if (e.type == PET_TEXT) {
 			if (e.has_token) {
 				out_spaces[num_spaces++] = space;
 				space = 0.0f;
@@ -1065,7 +1039,7 @@ static Box *create_multi_token_box(Document *document, Node *node,
 		icb_end - icb_start);
 	box->token_start = start_token;
 	box->token_end = end_token;
-	box->flags |= BOXFLAG_SELECTION_ANCHOR;
+	box->t.flags |= BOXFLAG_SELECTION_ANCHOR;
 
 	/* Add the box to the ICB's text box owner chain. */
 	box->owner_next = icb->text_boxes;
@@ -1134,7 +1108,7 @@ static unsigned build_line_text_boxes(Document *document, Node *node,
 				box = last_token->child->box;
 				box->token_start = token_index - 1;
 				box->token_end = token_index;
-				box->flags |= BOXFLAG_SELECTION_ANCHOR;
+				box->t.flags |= BOXFLAG_SELECTION_ANCHOR;
 			} else {
 				box = create_multi_token_box(document, node, icb, 
 					run_start, token_index, icb_start, icb_end);
@@ -1180,9 +1154,9 @@ static void construct_boxes_from_paragraph(Document *document, Node *node,
 	float line_height)
 {
 	/* We must have an up-to-date ICB. */
-	assertb((node->flags & (NFLAG_REBUILD_INLINE_CONTEXT | 
+	assertb((node->t.flags & (NFLAG_RECONSTRUCT_PARAGRAPH | 
 		NFLAG_REMEASURE_INLINE_TOKENS)) == 0);
-	InlineContext *icb = node->inline_context;
+	InlineContext *icb = node->icb;
 
 	/* Destroy any existing text box chain. */
 	if (icb->text_boxes != NULL) {
@@ -1193,7 +1167,7 @@ static void construct_boxes_from_paragraph(Document *document, Node *node,
 	/* Create line boxes and divide our child boxes between the line boxes 
 	 * using the computed breakpoints. */
 	Box *container = node->box;
-	destroy_sibling_chain(document, container->first_child, false);
+	destroy_sibling_chain(document, container->t.first.box, false);
 	unsigned token_index = 0;
 	for (unsigned i = 0; i < num_lines; ++i) {
 		/* Make a line box to contain the words. */
@@ -1213,19 +1187,19 @@ static void construct_boxes_from_paragraph(Document *document, Node *node,
 
 		/* Set an explicit height on empty lines to prevent them from 
 		 * collapsing. */
-		if (line_box->first_child == NULL) {
+		if (line_box->t.first == NULL) {
 			set_ideal_size(document, line_box, AXIS_V, DMODE_ABSOLUTE, 
 				line_height);
 		}
 	}
 
-	node->flags |= NFLAG_UPDATE_TEXT_LAYERS;
+	node->t.flags |= NFLAG_UPDATE_TEXT_LAYERS;
 }
 
 /* Reconstructs the text boxes inside an inline container box. */
 void update_inline_boxes(Document *document, Box *box, float width)
 {
-	Node *node = box->owner;
+	Node *node = box->t.counterpart.node;
 	
 	int line_width = round_signed(width);
 	
@@ -1264,9 +1238,9 @@ void update_inline_boxes(Document *document, Box *box, float width)
 
 	/* No need to do paragraph layout again unless the container's width 
 	 * changes. */
-	box->layout_flags |= BLFLAG_PARAGRAPH_VALID;
-	if ((node->flags & NFLAG_IN_SELECTION_CHAIN) != 0)
-		node->flags |= NFLAG_UPDATE_SELECTION_LAYERS;
+	box->layout_flags |= BLFLAG_TEXT_VALID;
+	if ((node->t.flags & NFLAG_IN_SELECTION_CHAIN) != 0)
+		node->t.flags |= NFLAG_UPDATE_SELECTION_LAYERS;
 }
 
 static const unsigned MAX_CONTEXT_TEXT_LAYERS = 16;
@@ -1299,9 +1273,9 @@ static unsigned find_text_style_bucket(const TextStyleBucket * const *table,
 VisualLayer *build_text_layer_stack(Document *document, Node *node)
 {
 	/* We must have an up-to-date ICB. */
-	assertb((node->flags & (NFLAG_REBUILD_INLINE_CONTEXT | 
+	assertb((node->t.flags & (NFLAG_RECONSTRUCT_PARAGRAPH | 
 		NFLAG_REMEASURE_INLINE_TOKENS)) == 0);
-	const InlineContext *icb = node->inline_context;
+	const InlineContext *icb = node->icb;
 	
 	/* Count the number of characters for each distinct text style key in the
 	 * context, producing a list of layers that we need to create. */
@@ -1439,7 +1413,7 @@ VisualLayer *build_text_layer_stack(Document *document, Node *node)
 			x = round_signed(content_edge_lower(text_box, AXIS_H));
 			y = round_signed(content_edge_lower(text_box, AXIS_V));
 			character_flags = TLF_TOKEN_HEAD;
-			if (last_text_box == NULL || text_box->parent != last_text_box->parent)
+			if (last_text_box == NULL || text_box->t.parent != last_text_box->t.parent)
 				character_flags |= TLF_LINE_HEAD;
 			last_text_box = text_box;
 		}
@@ -1495,7 +1469,7 @@ unsigned read_inline_text(const Document *document, const Node *node,
 	InternalAddress start, InternalAddress end, char *buffer)
 {
 	assertb(node->layout == LAYOUT_INLINE_CONTAINER);
-	assertb(node->inline_context != NULL);
+	assertb(node->icb != NULL);
 
 	document;
 
@@ -1503,7 +1477,7 @@ unsigned read_inline_text(const Document *document, const Node *node,
 	end = expand_internal_address(node, end);
 
 	WhiteSpaceMode space_mode = (WhiteSpaceMode)node->style.white_space_mode;
-	const InlineContext *icb = node->inline_context;
+	const InlineContext *icb = node->icb;
 	unsigned read = 0;
 	for (unsigned i = start.token; i <= end.token; ++i) {
 		const InlineToken *token = icb->tokens + i;

@@ -1,26 +1,61 @@
 #pragma once
 
+#include "stacker_platform.h"
 #include "stacker_attribute.h"
 #include "stacker_rule.h"
-#include "stacker_inline.h"
+#include "stacker_inline2.h"
 #include "stacker_diagnostics.h"
 #include "stacker_quadtree.h"
 #include "stacker_message.h"
+#include "stacker_layout.h"
 #include "url_cache.h"
 
 namespace stkr {
 
 struct Box;
 
+const int INVALID_VIEW_ID = -1;
+
+/* The top-level progress of a document update. */
+enum DocumentUpdateStage {
+	DUS_PRE_LAYOUT,  // Update nodes before layout.
+	DUS_LAYOUT,      // Compute box layout.
+	DUS_POST_LAYOUT, // Update nodes after layout.
+	DUS_COMPLETE     // Done.
+};
+
+/* The progress in updating the current node in the pre-layout pass. */
+enum NodePreLayoutUpdateStage {
+	NUS_UPDATE,           // Main update. Do preorder and postorder operations as specified by the iterator.
+	NUS_COMPLETE          // Done.
+};
+
+const unsigned INCREMENTAL_UPDATE_SCRATCH_BYTES = 512;
+
+/* The state of an incremental document update. */
+struct IncrementalUpdateState {
+	DocumentUpdateStage stage;
+	NodePreLayoutUpdateStage pre_layout_stage;
+	TimerValue start_time;
+	uintptr_t timeout;
+	TreeIterator iterator;
+	IncrementalLayoutState layout_state;
+	uint8_t scratch_buffer[INCREMENTAL_UPDATE_SCRATCH_BYTES];
+};
+
 struct Document {
 	struct System *system;
 
 	Node *root;
 	unsigned flags;
-	unsigned layout_clock;
+	unsigned update_clock;
 	unsigned change_clock; 
-	unsigned change_clock_at_layout;
+	unsigned change_clock_at_update;
 	unsigned root_dims[2];
+
+	/* Views. */
+	View *views;
+	unsigned available_view_ids;
 
 	/* Box free list. */
 	Box *free_boxes;
@@ -28,7 +63,7 @@ struct Document {
 	/* Rules. */
 	RuleTable rules;
 	unsigned global_rule_table_revision;
-	unsigned rule_revision_at_layout;
+	unsigned rule_revision_at_update;
 
 	/* Styling. */
 	uint32_t selected_text_color;
@@ -60,6 +95,9 @@ struct Document {
 	unsigned mouse_modifiers;
 	const View *selection_view;
 
+	/* Incremental update state. */
+	IncrementalUpdateState *update;
+
 	/* Message queue. */
 	MessageQueue message_queue;
 
@@ -78,6 +116,7 @@ struct Document {
 };
 
 bool needs_update(const Document *document);
+bool check_interrupt(const Document *document);
 void document_notify_box_destroy(Document *document, Box *box);
 void document_notify_node_destroy(Document *document, Node *node);
 void document_notify_node_changed(Document *document, Node *node);
@@ -98,6 +137,11 @@ unsigned document_fetch_notify_callback(urlcache::UrlHandle handle,
 	System *system, Document *document, urlcache::UrlFetchState fetch_state);
 void document_store_source(Document *document, const char *source, 
 	unsigned length);
+int allocate_view_id(Document *document);
+void deallocate_view_id(Document *document, int id);
+void add_to_view_list(Document *document, View *view);
+void remove_from_view_list(Document *document, View *view);
 
 } // namespace stkr
+
 

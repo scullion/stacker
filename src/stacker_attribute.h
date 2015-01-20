@@ -223,9 +223,9 @@ enum CursorType {
 
 enum VariantType { VTYPE_INTEGER, VTYPE_FLOAT, VTYPE_STRING };
 
-/* Tagged union representing a number or string, and also specifying a value
- * semantic which says something like, "this integer is a word wrap mode" or
- * "this string is a URL". */
+/* Tagged union representing a number or a UTF-8 string, and also specifying a 
+ * value semantic which says something like, "this integer is a word wrap mode" 
+ * or "this string is a URL". */
 struct Variant {
 	VariantType type;
 	ValueSemantic semantic;
@@ -274,7 +274,7 @@ inline void variant_set_string(Variant *v, const char *s, unsigned length,
 inline void variant_set_string(Variant *v, const char *s, 
 	ValueSemantic vs = VSEM_NONE)
 {
-	variant_set_string(v, s, strlen(s), vs);
+	variant_set_string(v, s, strlen((const char *)s), vs);
 }
 
 AttributeAssignment make_assignment(Token name, int value, 

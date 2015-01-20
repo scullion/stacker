@@ -20,29 +20,17 @@ namespace stkr {
 
 using namespace urlcache;
 
-/* Returns a pointer to the text array located after a text layer in memory. */
-const char *get_text_layer_text(const VisualLayer *layer)
-{
-	return (const char *)(layer + 1);
-}
-
-/* Returns a text layer's array of character flags. */
-const uint16_t *get_text_layer_flags(const VisualLayer *layer)
-{
-	return (const uint16_t *)(get_text_layer_text(layer) + layer->text.length);
-}
-
-/* Returns a text layer's colour palette. */
-const uint32_t *get_text_layer_palette(const VisualLayer *layer)
-{
-	return (const uint32_t *)(get_text_layer_flags(layer) + layer->text.length);
-}
-
-/* Returns a pointer to the array of struct { int x, y; } positions located
- * after a text layer in memory. */
+/* Returns a pointer to a text layer's array of X offsets. */
 const int *get_text_layer_positions(const VisualLayer *layer)
 {
-	return (const int *)(get_text_layer_palette(layer) + layer->text.num_colors);
+	return (const int *)(layer + 1);
+}
+
+/* Returns a pointer to the text array located after a text layer in memory. */
+const void *get_text_layer_text(const VisualLayer *layer)
+{
+	return (const void *)(get_text_layer_positions(layer) + 
+		layer->text.num_characters);
 }
 
 /* Default-initializes a LayerPosition structure. */
@@ -134,11 +122,11 @@ VisualLayer *create_layer(Document *document, const Node *node,
 		layer->pane.fill_color = 0;
 		initialize_layer_position(&layer->pane.position);
 	} else if (type == VLT_TEXT) {
-		layer->text.key = 0;
-		layer->text.font_id = INVALID_FONT_ID;
-		layer->text.flags = 0;
-		layer->text.length = 0;
-		layer->text.num_colors = 0;
+		layer->text.container = NULL;
+		layer->text.start = 0;
+		layer->text.end = 0;
+		layer->text.num_characters = 0;
+		layer->text.num_code_units = 0;
 	}
 	return layer;
 }
@@ -458,11 +446,23 @@ void set_box_dimensions_from_image(Document *document, Node *node, Box *box)
 {
 	VisualLayer *background = layer_chain_find(VLCHAIN_NODE, node->layers, LKEY_BACKGROUND);
 	VisualLayer *image = layer_chain_find(VLCHAIN_NODE, node->layers, LKEY_CONTENT);
-	if (background != NULL && background->type == VLT_IMAGE && node->first_child == NULL)
+	if (background != NULL && background->type == VLT_IMAGE && 
+		node->t.first.node == NULL)
 		set_box_dimensions_from_layer(document, box, background);
 	if (image != NULL && image->type == VLT_IMAGE)
 		set_box_dimensions_from_layer(document, box, image);
 }
 
+/* Finds the intercharacter position closest to a horizontal offset into a
+ * text layer. */
+unsigned intercharacter_position(const VisualLayer *layer, float dx)
+{
+	const int *positions = get_text_layer_positions(layer);
+	unsigned i, num_characters = layer->text.num_characters;
+	for (i = 0; i < num_characters; ++i)
+		if (dx >= (float)positions[i])
+			break;
+	return layer->text.start + i;
+}
 
 } // namespace stkr

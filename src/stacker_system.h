@@ -18,6 +18,7 @@ struct LogicalFont {
 	uint16_t flags;
 };
 
+/* Values are fixed point at TEXT_METRIC_PRECISION. */
 struct FontMetrics {
 	unsigned height;
 	unsigned em_width;
@@ -43,6 +44,8 @@ struct CachedFont {
 struct System {
 	unsigned flags;
 	BackEnd *back_end;
+	TextEncoding encoding;
+	TextEncoding message_encoding;
 	
 	/* Font handling. */
 	CachedFont font_cache[MAX_CACHED_FONTS];
@@ -74,10 +77,12 @@ int16_t get_font_id(System *system, const LogicalFont *logfont);
 void *get_font_handle(System *system, int16_t font_id);
 const FontMetrics *get_font_metrics(System *system, int16_t font_id);
 const LogicalFont *get_font_descriptor(System *system, int16_t font_id);
-void measure_text(System *system, int16_t font_id, 
-	const char *text, unsigned text_length, 
-	unsigned *width, unsigned *height, 
-	unsigned *character_widths); 
+unsigned measure_text(System *system, int16_t font_id, const void *text, 
+	unsigned length, unsigned *advances);
+unsigned measure_text_rectangle(System *system, int16_t font_id, 
+	const void *text, unsigned length, 
+	unsigned *out_width, unsigned *out_height, 
+	unsigned **out_advances = NULL);
 int16_t get_debug_label_font_id(System *system);
 
 } // namespace stkr

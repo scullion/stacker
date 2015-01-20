@@ -4,19 +4,21 @@
 #include <cstring>
 #include <cstdarg>
 
+#include <algorithm>
+
 #include "stacker.h"
 #include "stacker_token.h"
 #include "stacker_attribute.h"
 #include "stacker_util.h"
 #include "stacker_node.h"
 #include "stacker_document.h"
-
-#include <algorithm>
+#include "stacker_encoding.h"
+#include "stacker_system.h"
 
 namespace stkr {
 
 const int STKR_OK_HALT     = 1; /* No error, but don't parse any more. */
-const int STKR_OK_NO_SCOPE = 2; /* No error, but this is a non-document tag (a rule); don't try to create a node from it. */
+const int STKR_OK_NO_SCOPE = 2; /* No error, but this is a non-document tag (a rule). Don't try to create a node from it. */
 const int STKR_SKIP_TAG    = 3; /* No error, but the tag should be ignored. */
 
 static int read_url_literal(Parser *parser);
@@ -24,66 +26,118 @@ static int read_color_literal(Parser *parser, int keyword);
 
 /* True if 'ch' is one of the characters that can be backslash-escaped in
  * free text. */
-inline bool is_escapeable(char ch)
+inline bool is_escapeable(uint32_t ch)
 {
 	return ch == '<' || ch == '>' || ch == '\\';
 }
 
-/* Copies a string, replacing any backslash escape sequences with the 
+/* Copies a UTF-8 string, replacing any backslash escape sequences with the 
  * corresponding unescaped character. */
 static unsigned unescape(const char *s, unsigned length, char *dest)
 {
 	unsigned j = 0;
 	for (unsigned i = 0; i < length; ++i) {
-		if (is_escapeable(s[i]) && i != 0 && s[i - 1] == '\\')
+		if (is_escapeable((uint32_t)s[i]) && i != 0 && 
+			s[i - 1] == (uint8_t)'\\')
 			j--;
 		dest[j++] = s[i];
 	}
 	return j;
 }
 
-/* Reads and cleans up a small amount of "context" text for use in an error 
- * message. */
+inline uint32_t next_character(Parser *s)
+{
+	s->ch0 = s->ch1;
+	s->pos_ch0 = s->pos_ch1;
+	s->pos_ch1 = s->pos;
+	s->pos += utf8_decode(s->input + s->pos, 
+		s->input + s->input_size, &s->ch1);
+	return s->ch0;
+}
+
+inline uint32_t skip_two_characters(Parser *s)
+{
+	next_character(s);
+	return next_character(s);
+}
+
+inline uint32_t rewind(Parser *s, unsigned saved_pos_ch0)
+{
+	s->pos = saved_pos_ch0;
+	return skip_two_characters(s);
+}
+
+/* Reads and cleans up a small amount of text surrounding the current token for 
+ * use in error messages. */
 static int read_context(const Parser *parser, char *buffer, unsigned buffer_size)
 {
-	unsigned max_length = std::min(buffer_size - 1, 
-		parser->input_size - parser->token_start);
-	bool drop_spaces = true;
+	const char *s = parser->input + parser->token_start;
+	const char *end = parser->input + parser->input_size;
 	unsigned length = 0;
-	for (unsigned i = 0; i < max_length; ++i) {
-		char ch = parser->input[parser->token_start + i];
-		bool is_space = isspace(ch) != 0;
-		if (!is_space || !drop_spaces)
-			buffer[length++] = (ch == '\n' || ch == '\r') ? ' ' : ch;
+	bool drop_spaces = true;
+	bool is_space = false;
+	for (;;) {
+		uint32_t code_point;
+		s += utf8_decode(s, end, &code_point);
+		if (code_point == END_OF_STREAM)
+			break;
+		is_space = unicode_isspace(code_point);
+		if (!(is_space && drop_spaces)) {
+			if (is_space)
+				code_point = ' '; /* Convert newlines to spaces. */
+			if (length + utf8_encoded_length(code_point) >= buffer_size)
+				break;
+			length += utf8_encode(buffer + length, code_point);
+		}
 		drop_spaces = is_space;
 	}
-	length -= (length != 0 && isspace(buffer[length - 1]));
-	buffer[length] = '\0';
+	length -= (length != 0 && is_space); /* Remove trailing space. */
+	buffer[length] = 0;
 	return length;
 }
 
-static int parser_message(Parser *parser, int code, const char *message, va_list args)
+static int parser_message(Parser *parser, int code, 
+	const char *fmt, va_list args)
 {
-	int length = vsnprintf(parser->message, sizeof(parser->message), message, args);
+	/* Format the main message. */
+	char message_utf8[MAX_MESSAGE_SIZE + 1];
+	int length = vsnprintf((char *)message_utf8, sizeof(message_utf8), 
+		fmt, args);
 	if (length < 0)
 		length = MAX_MESSAGE_SIZE;
+
+	/* Add a suffix giving some indication of the location of the error. */
 	char context[ERROR_CONTEXT_CHARS + 1];
 	int context_length = read_context(parser, context, ERROR_CONTEXT_CHARS + 1);
-	int suffix_length, remaining = sizeof(parser->message) - length;
+	int suffix_length, remaining = sizeof(message_utf8) - length;
 	if (context_length != 0) {
-		suffix_length = snprintf(parser->message + length, 
+		suffix_length = snprintf((char *)message_utf8 + length, 
 			remaining, " near \"%s\" on line %u", 
 			context, parser->line);
 	} else {
-		suffix_length = snprintf(parser->message + length, remaining, 
+		suffix_length = snprintf((char *)message_utf8 + length, remaining, 
 			" at end of input");
 	}
 	if (suffix_length < 0)
 		suffix_length = remaining;
 	length = std::min(unsigned(length + suffix_length), MAX_MESSAGE_SIZE);
-	parser->message[length] = '\0';
+
+	/* Convert the message into the system encoding. */
+	if (parser->message.utf8 != NULL)
+		delete [] parser->message.utf8;
+	parser->message_length = utf8_transcode_heap(message_utf8, length, 
+		&parser->message.data, parser->system->message_encoding);
+
 	parser->code = code;
 	return code;
+}
+
+static void clear_message(Parser *parser)
+{
+	if (parser->message.utf8 != NULL)
+		delete [] parser->message.utf8;
+	parser->message.utf8 = NULL;
+	parser->message_length = 0;
 }
 
 static int parser_error(Parser *parser, int code, ...)
@@ -182,7 +236,7 @@ static int pop_scope(Parser *parser)
 	Node *popped = parser->scope;
 	if (popped == NULL)
 		return STKR_MISMATCHED_TAGS;
-	parser->scope = popped->parent;
+	parser->scope = popped->t.parent.node;
 	if (parser->scope == parser->root) {
 		if (parser->first_parsed == NULL)
 			parser->first_parsed = popped;
@@ -194,31 +248,32 @@ static int pop_scope(Parser *parser)
 }
 
 /* Reads a numeric literal token. */
-static int read_number(Parser *parser, char ch)
+static int read_number(Parser *parser)
 {
 	/* Read any prefixes. */
 	char buf[64], *end;
 	unsigned length = 0;
+	uint32_t ch = parser->ch0;
 	if (ch == '-') {
-		buf[length++] = ch;
-		buf[length] = '\0';
-		if (++parser->pos == parser->input_size)
+		buf[length++] = '-';
+		buf[length] = 0;
+		ch = next_character(parser);
+		if (ch == END_OF_STREAM)
 			return parser_error(parser, STKR_INVALID_NUMERIC_LITERAL, buf);
-		ch = parser->input[parser->pos];
 	}
 
 	/* Read the digits. */
 	bool is_float = false;
 	do {
-		buf[length++] = ch;
-		if (++parser->pos == parser->input_size)
+		buf[length++] = (char)ch;
+		ch = next_character(parser);
+		if (ch == END_OF_STREAM)
 			break;
-		ch = parser->input[parser->pos];
 		if (ch == '.' || ch == 'e')
 			is_float = true;
-	} while ((isdigit(ch) || ch == '.' || ch == 'e') && 
+	} while ((unicode_isdigit(ch) || ch == '.' || ch == 'e') && 
 		length + 1 != sizeof(buf));
-	buf[length] = '\0';
+	buf[length] = 0;
 
 	/* Convert the number. */
 	if (is_float) {
@@ -236,7 +291,7 @@ static int read_number(Parser *parser, char ch)
 				(float)parser->token_value.integer);
 		}
 		parser->token = TOKEN_PERCENTAGE;
-		parser->pos++;
+		next_character(parser); /* Skip percentage sign. */
 	} else {
 		parser->token = is_float ? TOKEN_FLOAT : TOKEN_INTEGER;
 	}
@@ -245,36 +300,35 @@ static int read_number(Parser *parser, char ch)
 
 static int next_token(Parser *parser)
 {
-	if (parser->pos == parser->input_size) {
+	uint32_t ch = parser->ch0;
+	if (ch == END_OF_STREAM) {
 		parser->token = TOKEN_EOF;
 		return TOKEN_EOF;
 	}
-	char ch = parser->input[parser->pos];
 	if (parser->in_tag) {
 		/* Skip white space. */
-		while (isspace(ch)) {
+		while (unicode_isspace(ch)) {
 			parser->line += (ch == '\n');
-			if (++parser->pos == parser->input_size) {
+			ch = next_character(parser);
+			if (ch == END_OF_STREAM) {
 				parser->token = TOKEN_EOF;
 				return TOKEN_EOF;
 			}
-			ch = parser->input[parser->pos];
 		}
 		/* Read the token. */
-		char ch2 = parser->pos + 1 != parser->input_size ? 
-			parser->input[parser->pos + 1] : '\0';
+		uint32_t ch2 = parser->ch1;
 		parser->token_start = parser->pos;
 		if (ch == '>') {
 			parser->token = TOKEN_CLOSE_ANGLE;
 			parser->in_tag = false;
-			parser->pos++;
+			next_character(parser);
 		} else if (ch == '/' && ch2 == '>') {
 			parser->token = TOKEN_SLASH_CLOSE_ANGLE;
 			parser->in_tag = false;
-			parser->pos += 2;
+			skip_two_characters(parser);
 		} else if (ch == '=') {
 			parser->token = TOKEN_EQUALS;
-			parser->pos++;
+			next_character(parser);
 		} else if (ch2 == '=' && (ch == ':' || ch == '+' || ch == '-' || 
 			ch == '*' || ch == '/')) {
 			switch (ch) {
@@ -294,48 +348,45 @@ static int next_token(Parser *parser)
 					parser->token = TOKEN_SLASH_EQUALS;
 					break;
 			}
-			parser->pos += 2;
+			skip_two_characters(parser);
 		} else if (ch == '(') {
 			parser->token = TOKEN_OPEN_PARENTHESIS;
-			parser->pos++;
+			next_character(parser);
 		} else if (ch == ')') {
 			parser->token = TOKEN_CLOSE_PARENTHESIS;
-			parser->pos++;
+			next_character(parser);
 		} else if (ch == ',') {
 			parser->token = TOKEN_COMMA;
-			parser->pos++;
-		} else if (isdigit(ch) || ch == '-') {
-			if ((parser->token = read_number(parser, ch)) < 0)
+			next_character(parser);
+		} else if (unicode_isdigit(ch) || ch == '-') {
+			if ((parser->token = read_number(parser)) < 0)
 				return parser->token;
 		} else if (ch == '"') {
 			/* A quoted string literal. */
 			parser->token = TOKEN_STRING;
-			variant_set_string(&parser->token_value, 
-				parser->input + parser->pos + 1, (unsigned)(-1));
+			next_character(parser); /* Consume the opening quote. */
+			unsigned start = parser->pos_ch0;
+			variant_set_string(&parser->token_value, parser->input + start, 0);
 			do {
-				if (++parser->pos == parser->input_size) {
-					parser->token = parser_error(parser, STKR_UNTERMINATED_STRING);
+				ch = next_character(parser);
+				if (ch == END_OF_STREAM) {
+					parser->token = parser_error(parser, 
+						STKR_UNTERMINATED_STRING);
 					return parser->token;
 				}
-				ch = parser->input[parser->pos];
-				parser->token_value.string.length++;
 			} while (ch != '"');
-			parser->pos++; // Skip closing quote.
-		} else if (isidentfirst(ch)) {
+			parser->token_value.string.length = parser->pos_ch0 - start;
+			next_character(parser); /* Consume the closing quote. */
+		} else if (unicode_isidentfirst(ch)) {
 			/* A keyword, or something we don't understand. */
-			char buf[64];
-			unsigned length = 0;
+			unsigned start = parser->pos_ch0;
 			do {
-				buf[length++] = (char)tolower(ch);
-				if (++parser->pos == parser->input_size)
+				ch = next_character(parser);
+				if (ch == '-' && !unicode_isalnum(parser->ch1))
 					break;
-				ch = parser->input[parser->pos];
-				if (ch == '-' && (parser->pos + 1 == parser->input_size ||
-					!isalnum(parser->input[parser->pos + 1])))
-					break;
-			} while (isident(ch) && length + 1 != sizeof(buf));
-			buf[length] = '\0';
-			int keyword = find_keyword(buf, length);
+			} while (unicode_isident(ch));
+			int keyword = find_keyword(parser->input + start, 
+				parser->pos_ch0 - start);
 			
 			/* Handle keywords like "false" and "true" that become non-keyword
 			 * tokens, and simplify compound tokens like url(...) and 
@@ -367,7 +418,7 @@ static int next_token(Parser *parser)
 			return parser_error(parser, STKR_INVALID_INPUT);
 		}
 	} else {
-		parser->token_start = parser->pos;
+		parser->token_start = parser->pos_ch0;
 
 		/* Return a break token if the last character was a line break. */
 		if (parser->emit_break) {
@@ -379,26 +430,26 @@ static int next_token(Parser *parser)
 		/* Freeform input consists of text and breaks, and is terminated by an 
 		 * unescaped '<'. */
 		if (ch == '<') {
-			ch = (++parser->pos != parser->input_size) ? 
-				parser->input[parser->pos] : '\0';
+			ch = next_character(parser);
 			if (ch == '/') {
 				parser->token = TOKEN_OPEN_ANGLE_SLASH;
-				parser->pos++;
+				next_character(parser);
 			} else {
 				parser->token = TOKEN_OPEN_ANGLE;
 			}
 			parser->in_tag = true;
 			return parser->token;
-
 		}
 
 		/* A text token. */
 		parser->token = TOKEN_TEXT_BLANK;
 		parser->token_escape_count = 0;
-		variant_set_string(&parser->token_value, parser->input + parser->pos, 0);
-		bool seen_newline = false, escaped = false;
+		variant_set_string(&parser->token_value, 
+			parser->input + parser->pos_ch0, 0);
+		bool seen_newline = false;
+		unsigned start = parser->pos_ch0;
 		do {
-			if (isspace(ch)) {
+			if (unicode_isspace(ch)) {
 				if (ch == '\n') {
 					parser->emit_break = seen_newline;
 					seen_newline = true;
@@ -407,17 +458,14 @@ static int next_token(Parser *parser)
 				seen_newline = false;
 				parser->token = TOKEN_TEXT;
 			}
-			escaped = (ch == '\\');
-			parser->token_value.string.length++;
-			if (++parser->pos == parser->input_size)
-				break;
-			ch = parser->input[parser->pos];
-			if (escaped && is_escapeable(ch)) {
+			if (parser->ch0 == '\\' && is_escapeable(parser->ch1)) {
 				parser->token_escape_count++;
-			} else if (ch == '<') {
-				break;
+				ch = skip_two_characters(parser);
+			} else {
+				ch = next_character(parser);
 			}
-		} while (!parser->emit_break);
+		} while (ch != '<' && ch != END_OF_STREAM && !parser->emit_break);
+		parser->token_value.string.length = parser->pos_ch0 - start;
 	}
 	return parser->token;
 }
@@ -427,9 +475,9 @@ static int read_url_literal(Parser *parser)
 {
 	/* Look ahead to decide whether this is a url '(' ... ')' literal or 
 	 * the keyword 'url' alone. */
-	unsigned initial_pos = parser->pos;
+	unsigned saved_pos = parser->pos_ch0;
 	if (next_token(parser) != TOKEN_OPEN_PARENTHESIS) {
-		parser->pos = initial_pos;
+		rewind(parser, saved_pos);
 		parser->token = TOKEN_URL;
 		variant_set_integer(&parser->token_value, TOKEN_URL);
 		return TOKEN_URL;
@@ -520,6 +568,8 @@ static int add_text_node(Parser *parser)
 			parser->token_value.string.data, 
 			parser->token_value.string.length, 
 			node->text);
+		set_node_debug_string(node, "text (%u characters)", 
+			unescaped_length);
 		append_child(parser->document, parser->scope, node);
 	} else {
 		parser_error(parser, STKR_ERROR);
@@ -527,9 +577,8 @@ static int add_text_node(Parser *parser)
 	return rc;
 }
 
-static bool should_skip_tag(const Parser *parser, int tag_name)
+static bool should_skip_tag(const Parser *, int tag_name)
 {
-	parser;
 	return tag_name != TOKEN_RULE && 
 		node_type_for_tag(tag_name) == LNODE_INVALID;
 }
@@ -835,9 +884,15 @@ void init_parser(Parser *parser, System *system, Document *document,
 	parser->input_size = 0;
 	parser->pos = 0;
 	parser->token = STKR_INVALID_TOKEN;
-	parser->message[0] = '\0';
+	parser->message.utf8 = NULL;
+	parser->message_length = 0;
 	parser->code = STKR_OK;
 	parser->flags = flags;
+}
+
+void deinit_parser(Parser *parser)
+{
+	clear_message(parser);
 }
 
 static void reset_parser(Parser *parser, Node *root, 
@@ -855,8 +910,10 @@ static void reset_parser(Parser *parser, Node *root,
 	parser->token_start = 0;
 	parser->in_tag = false;
 	parser->emit_break = false;
-	parser->message[0] = '\0';
 	parser->code = STKR_OK;
+	clear_message(parser);
+	if (skip_two_characters(parser) == UNICODE_BOM)
+		next_character(parser);
 	next_token(parser);
 }
 
@@ -888,46 +945,50 @@ static int parse_helper(
 	unsigned flags, 
 	Node **first_parsed,
 	Node **last_parsed,
-	char *error_buffer, 
-	unsigned max_error_size)
+	void *error_buffer, 
+	unsigned error_buffer_size)
 {
 	Parser parser;
 	init_parser(&parser, system, document, flags);
 	int rc = parse(&parser, root, input, length);
-	if (error_buffer != NULL) {
-		strncpy(error_buffer, parser.message, max_error_size);
-		error_buffer[max_error_size - 1] = '\0';
-	}
+	if (error_buffer != NULL)
+		strcpy_encoding(parser.message.data, parser.message_length, 
+			error_buffer, error_buffer_size, system->message_encoding);
 	if (first_parsed != NULL)
 		*first_parsed = parser.first_parsed;
 	if (last_parsed != NULL)
 		*last_parsed = parser.last_parsed;
+	deinit_parser(&parser);
 	return rc;
 }
 
+/* Public parsing function. */
 int parse(
 	System *system, 
 	Document *document, 
 	Node *root, 
 	const char *input, 
 	unsigned length, 
-	char *error_buffer, 
-	unsigned max_error_size)
+	void *error_buffer, 
+	unsigned error_buffer_size)
 {
 	return parse_helper(system, document, root, input, length, 0, 
-		NULL, NULL, error_buffer, max_error_size);
+		NULL, NULL, error_buffer, error_buffer_size);
 }
 
+/* Attempts to create a single tree of nodes from a markup fragment. The parser
+ * halts as soon as the markup for one node has been read, ignoring the 
+ * remainder of the input. */
 int create_node_from_markup(
 	Node **out_node, 
 	Document *document, 
 	const char *input, 
 	unsigned length, 
 	char *error_buffer, 
-	unsigned max_error_size)
+	unsigned error_buffer_size)
 {
 	return parse_helper(document->system, document, NULL, input, length, 
-		PARSEFLAG_SINGLE_NODE, out_node, NULL, error_buffer, max_error_size);
+		PARSEFLAG_SINGLE_NODE, out_node, NULL, error_buffer, error_buffer_size);
 }
 
 } // namespace stkr

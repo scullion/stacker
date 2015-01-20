@@ -11,6 +11,7 @@
 #include "stacker_node.h"
 #include "stacker_document.h"
 #include "stacker_system.h"
+#include "stacker_encoding.h"
 
 namespace stkr {
 
@@ -34,70 +35,84 @@ static uint64_t make_rule_lookup_key(uint64_t key, unsigned level)
 /* Parses a selector, converting it into an array of rule keys. */
 int parse_selector(ParsedSelector *ps, const char *s, int length)
 {
-	ps->total_keys = 0;
-	ps->num_clauses = 0;
-
 	if (length < 0)
 		length = (int)strlen(s);
-	unsigned depth = 0, i = unsigned(length - 1), ul = (unsigned)length;
+	const char *end = s + length;
+	uint64_t keys[MAX_SELECTOR_KEYS];
+	ps->num_clauses = 0;
+	ps->total_keys = 0;
+	unsigned depth = 0;
 	for (;;) {
 		/* Skip white space. */
-		while (i + 1 != 0 && isspace(s[i]))
-			--i;
+		uint32_t ch;
+		const char *start;
+		do {
+			start = s;
+			s += utf8_decode(s, end, &ch);
+		} while (ch != END_OF_STREAM && unicode_isspace(ch));
 
-		/* Is this the end of the current clause? */
-		if (i + 1 == 0 || s[i] == ',') {
+		/* Does this character mark the end of a clause? */
+		if (ch == ',' || ch == END_OF_STREAM) {
 			if (depth == 0) {
+				/* An empty selector or clause. */
 				return (ps->num_clauses == 0) ? STKR_SELECTOR_EMPTY : 
 					STKR_SELECTOR_ILL_FORMED;
 			}
+
+			/* Reverse the part keys into the result. */
 			ps->keys_per_clause[ps->num_clauses++] = depth;
+			for (unsigned i = 0; i < depth; ++i) {
+				ps->keys[ps->total_keys++] = make_rule_lookup_key(
+					keys[depth - 1 - i], i);
+			}
 			depth = 0;
-			if (i + 1 == 0)
+			if (ch == END_OF_STREAM)
 				break;
-			--i; // Skip the comma.
+			s += utf8_decode(s, end, &ch); /* Skip the comma. */
 		} else {
 			/* Too many parts in this clause? */
 			if (depth == MAX_SELECTOR_DEPTH)
 				return STKR_SELECTOR_TOO_LONG;
 
-			/* Scan to the start of the part. */
-			while (i + 1 != 0 && !isspace(s[i]) && s[i] != ',')
-				--i;
-			unsigned before_part = i++;
-			
 			/* Read the node type to make the first token in the token buffer.
 			 * If there isn't a node type, the first token is "*". */
 			uint64_t tokens[MAX_RULE_CLASSES + 1];
 			unsigned num_tokens = 0;
-			if (isidentfirst(s[i]) || s[i] == '*') {
-				unsigned start = i;
-				do { ++i; } while (i != ul && isident(s[i]));
-				tokens[num_tokens++] = murmur3_64(s + start, i - start);
+			if (unicode_isidentfirst(ch) || ch == '*') {
+				unsigned token_length = 0;
+				do {
+					token_length++;
+					s += utf8_decode(s, end, &ch);
+				} while (ch != END_OF_STREAM && unicode_isident(ch));
+				tokens[num_tokens++] = murmur3_64(start, token_length);
 			} else {
 				tokens[num_tokens++] = murmur3_64_cstr("*");
 			}
-			
+
 			/* Read a sequence of zero or more ".class" or ":state" 
 			 * qualifiers. */
-			while (i != ul && (s[i] == '.' || s[i] == ':') && 
+			while ((ch == '.' || ch == ':') && 
 				num_tokens != MAX_RULE_CLASSES + 1) {
-				unsigned start = (s[i] == ':') ? i++ : ++i;
-				if (i == ul || !isidentfirst(s[i]))
+				const char *start = s;
+				if (ch != ':') /* Include ':', exclude '.'. */
+					start = s;
+				s += utf8_decode(s, end, &ch);
+				if (!unicode_isidentfirst(ch))
 					return STKR_SELECTOR_MISSING_CLASS;
-				do { ++i; } while (i != ul && isident(s[i]));
-				tokens[num_tokens++] = murmur3_64(s + start, i - start);
+				unsigned token_length = 0;
+				do {
+					token_length++;
+					s += utf8_decode(s, end, &ch);
+				} while (ch != END_OF_STREAM && unicode_isident(ch));
+				tokens[num_tokens++] = murmur3_64(start, token_length);
 			}
-			if (i != ul && !isspace(s[i]) && s[i] != ',')
+			if (ch != END_OF_STREAM && !unicode_isspace(ch) && ch != ',')
 				return STKR_SELECTOR_INVALID_CHAR;
-			i = before_part;
-
+			
 			/* Compute the combined key for this part by hashing the token 
 			 * keys. */
 			std::sort(tokens + 1, tokens + num_tokens);
-			uint64_t rule_key = murmur3_64(tokens, num_tokens * sizeof(uint64_t));
-			ps->keys[ps->total_keys++] = make_rule_lookup_key(rule_key, depth);
-			++depth;
+			keys[depth++] = murmur3_64(tokens, num_tokens * sizeof(uint64_t));
 		}
 	}
 
@@ -463,7 +478,7 @@ unsigned make_node_rule_keys(const System *system, int node_token,
 	/* Order the classes and pseudo-classes by their hashed names. */
 	std::sort(class_names, class_names + num_classes);
 
-	/* Output keys that match "*.<classes>" and "<tag>.<clasess>" selectors for 
+	/* Output keys that match "*.<classes>" and "<tag>.<classes>" selectors for 
 	 * each subset in the power set of the class names. */
 	uint64_t hashbuf[MAX_RULE_CLASSES + 2];
 	unsigned num_combinations = 1 << num_classes;
@@ -518,7 +533,7 @@ int node_matches_selector(const Document *document, const Node *node,
 				clause_match = false;
 				break;
 			}
-			n = n->parent;
+			n = n->t.parent.node;
 		}
 		if (clause_match)
 			break;
@@ -549,7 +564,8 @@ int match_nodes(const Document *document, const Node *root,
 
 	int depth = 0;
 	unsigned num_matched = 0;
-	for (const Node *node = root; node != NULL; ) {
+	const Node *node = root;
+	do {
 		int rc = node_matches_selector(document, node, ps);
 		if (rc == 1) {
 			if (num_matched != max_matched)
@@ -557,9 +573,9 @@ int match_nodes(const Document *document, const Node *root,
 			num_matched++;
 		}
 		node = ((unsigned)depth < (unsigned)max_depth) ? 
-			tree_next(document, root, node) : 
-			tree_next_up(document, root, node);
-	}
+			(const Node *)tree_next(&root->t, &node->t) : 
+			(const Node *)tree_next_up(&root->t, &node->t);
+	} while (node != NULL);
 	return (int)num_matched;
 }
 
@@ -583,7 +599,7 @@ unsigned match_rules(Document *document, Node *node,
 	const Rule **matched, unsigned max_rules,
 	const RuleTable *local_table, 
 	const RuleTable *global_table)
-              {
+{
 	static const unsigned MAX_MATCH_KEYS = 256;
 	static const unsigned LEVEL_MAX = 32;
 
@@ -649,7 +665,7 @@ unsigned match_rules(Document *document, Node *node,
 		}
 		
 		/* Move up the tree. */
-		n = n->parent;
+		n = n->t.parent.node;
 		++depth;
 	} while (n != NULL && depth != MAX_SELECTOR_DEPTH && 
 		match_count != MAX_MATCH_KEYS && len_b != 0);

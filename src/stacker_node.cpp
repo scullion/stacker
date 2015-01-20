@@ -11,7 +11,7 @@
 #include "stacker_document.h"
 #include "stacker_layer.h"
 #include "stacker_box.h"
-#include "stacker_inline.h"
+#include "stacker_inline2.h"
 #include "stacker_rule.h"
 #include "stacker_paragraph.h"
 #include "stacker.h"
@@ -33,6 +33,15 @@ extern const char * const NODE_TYPE_STRINGS[NUM_NODE_TYPES] = {
 	"user"
 };
 
+const unsigned DEFAULT_NODE_FLAGS =
+	NFLAG_PARENT_CHANGED | 
+	NFLAG_UPDATE_BACKGROUND_LAYERS | 
+	NFLAG_FOLD_ATTRIBUTES |
+	NFLAG_REBUILD_BOXES | 
+	NFLAG_UPDATE_MATCHED_RULES |
+	NFLAG_HAS_STATIC_TEXT |
+	NFLAG_HAS_STATIC_RULE_KEYS;
+
 NodeType get_type(const Node *node)
 {
 	return (NodeType)node->type;
@@ -45,12 +54,12 @@ Token get_token(const Node *node)
 
 const Box *get_box(const Node *node)
 {
-	return node->box;
+	return node->t.counterpart.box;
 }
 
 Box *get_box(Node *node)
 {
-	return node->box;
+	return node->t.counterpart.box;
 }
 
 unsigned get_text_length(const Node *node)
@@ -70,7 +79,7 @@ Layout get_layout(const Node *node)
 
 unsigned get_flags(const Node *node)
 {
-	return node->flags;
+	return node->t.flags;
 }
 
 const NodeStyle *get_style(const Node *node)
@@ -85,52 +94,52 @@ NodeStyle *get_style(Node *node)
 
 const Node *parent(const Node *node)
 {
-	return node->parent;
+	return node->t.parent.node;
 }
 
 const Node *next_sibling(const Node *node)
 {
-	return node->next_sibling;
+	return node->t.next.node;
 }
 
 const Node *previous_sibling(const Node *node)
 {
-	return node->prev_sibling;
+	return node->t.prev.node;
 }
 
 const Node *first_child(const Node *node)
 {
-	return node->first_child;
+	return node->t.first.node;
 }
 
 const Node *last_child(const Node *node)
 {
-	return node->last_child;
+	return node->t.last.node;
 }
 
 Node *parent(Node *node)
 {
-	return node->parent;
+	return node->t.parent.node;
 }
 
 Node *next_sibling(Node *node)
 {
-	return node->next_sibling;
+	return node->t.next.node;
 }
 
 Node *previous_sibling(Node *node)
 {
-	return node->prev_sibling;
+	return node->t.prev.node;
 }
 
 Node *first_child(Node *node)
 {
-	return node->first_child;
+	return node->t.first.node;
 }
 
 Node *last_child(Node *node)
 {
-	return node->last_child;
+	return node->t.last.node;
 }
 
 static bool refold_attributes(Document *document, Node *base);
@@ -167,7 +176,7 @@ const Attribute *find_inherited_attribute(const Node *node, int name,
 				*owner = node;
 			return attribute;
 		}
-		node = node->parent;
+		node = node->t.parent.node;
 	} while (node != NULL);
 	if (owner != NULL)
 		*owner = NULL;
@@ -276,15 +285,15 @@ void set_node_text(Document *document, Node *node, const char *text, int length)
 	if (length < 0)
 		length = (int)strlen(text);
 	if (length + 1 > (int)node->text_length) {
-		if ((node->flags & NFLAG_HAS_STATIC_TEXT) == 0)
+		if ((node->t.flags & NFLAG_HAS_STATIC_TEXT) == 0)
 			delete [] node->text;
 		node->text = new char[length + 1];
-		node->flags &= ~NFLAG_HAS_STATIC_TEXT;
+		node->t.flags &= ~NFLAG_HAS_STATIC_TEXT;
 	}
 	memcpy(node->text, text, length);
 	node->text[length] = '\0';
 	node->text_length = length;
-	set_node_flags(document, node, NFLAG_REBUILD_INLINE_CONTEXT, true);
+	set_node_flags(document, node, NFLAG_RECONSTRUCT_PARAGRAPH, true);
 }
 
 /* Sets the total width or height of a node, accounting for its padding. */
@@ -398,7 +407,6 @@ struct AttributeFoldingState {
 	bool have_font_face;
 	bool have_font_size;
 	bool must_update_font_id;
-	bool text_style_changed;
 };
 
 static VisitedAttribute *afs_add_visited(AttributeFoldingState *s, int name)
@@ -457,7 +465,7 @@ static void afs_add_modifiers(AttributeFoldingState *fs)
 {
 	uint32_t have_lhs[ATTRIBUTE_MASK_WORDS] = { 0 };
 
-	for (const Node *node = fs->base; node != NULL; node = node->parent) {
+	for (const Node *node = fs->base; node != NULL; node = node->t.parent.node) {
 		/* Get the attribute buffers of this node and its matched rules. */
 		const AttributeBuffer *buffers[1 + NUM_RULE_SLOTS];
 		unsigned num_buffers = sort_attribute_buffers(node, buffers);
@@ -545,7 +553,6 @@ static void afs_maybe_update_font(AttributeFoldingState *fs)
 	/* Make a new font ID from the descriptor. */
 	fs->style.text.font_id = get_font_id(system, &fs->descriptor);
 	fs->style.text.flags = fs->descriptor.flags;
-	fs->text_style_changed = true;
 	fs->must_update_font_id = false;
 }
 
@@ -571,13 +578,14 @@ static Attribute *afs_build_auto_value(AttributeFoldingState *fs,
 			metrics = get_font_metrics(fs->base->document->system, 
 				fs->style.text.font_id);
 			return abuf_append_integer(abuf, name, VSEM_NONE, 
-				metrics->height / 8);
+				round_fixed_to_int(metrics->height / 8, TEXT_METRIC_PRECISION));
 		case TOKEN_INDENT:
 			afs_maybe_update_font(fs);
 			metrics = get_font_metrics(fs->base->document->system, 
 				fs->style.text.font_id);
 			return abuf_append_integer(abuf, name, VSEM_NONE, 
-				metrics->paragraph_indent_width);
+				round_fixed_to_int(metrics->paragraph_indent_width, 
+					TEXT_METRIC_PRECISION));
 	}
 
 	AttributeSemantic semantic = attribute_semantic(name);
@@ -656,16 +664,12 @@ static void afs_reduce(AttributeFoldingState *fs)
 				fs->must_update_font_id = true;
 				break;
 			case TOKEN_COLOR:
-				if (abuf_read_integer(lhs, &integer_value) != ADEF_UNDEFINED) {
+				if (abuf_read_integer(lhs, &integer_value) != ADEF_UNDEFINED)
 					fs->style.text.color = (uint32_t)integer_value;
-					fs->text_style_changed = true;
-				}
 				break;
 			case TOKEN_TINT:
-				if (abuf_read_integer(lhs, &integer_value) != ADEF_UNDEFINED) {
+				if (abuf_read_integer(lhs, &integer_value) != ADEF_UNDEFINED)
 					fs->style.text.tint = (uint32_t)integer_value;
-					fs->text_style_changed = true;
-				}
 				break;
 			case TOKEN_BOLD:
 				if ((mode = abuf_read_mode(lhs)) != ADEF_UNDEFINED)
@@ -744,7 +748,7 @@ static void afs_reduce(AttributeFoldingState *fs)
 	 * attributes. If the rule is enabled and disabled to hide and show the
 	 * node, the other styles will change and change back again to no effect. */
 	if (maybe_switch_layout(document, base, new_layout))
-		base->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
+		base->t.flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
 	if (base->layout == LAYOUT_NONE)
 		fs->style = fs->base->style;
 }
@@ -755,31 +759,26 @@ static void afs_init(AttributeFoldingState *fs, Node *base)
 	fs->num_modifiers = 0;
 	fs->num_visited = 0;
 	memset(fs->required, 0, sizeof(fs->required));
-	fs->inherited = base->parent != NULL ? &base->parent->style : 
+	fs->inherited = base->t.parent.node != NULL ? &base->t.parent.node->style : 
 		&DEFAULT_NODE_STYLE;
 	fs->style = *fs->inherited;
 	fs->have_font_face = false;
 	fs->have_font_size = false;
-	fs->text_style_changed = false;
 	fs->must_update_font_id = (fs->style.text.font_id == INVALID_FONT_ID);
 }
 
 static void afs_finalize(AttributeFoldingState *fs)
 {
 	afs_maybe_update_font(fs);
-	if (fs->text_style_changed)
-		update_text_style_key(&fs->style.text);
 	/* Store the final style, invalidating text layers and layout depending on 
 	 * what changed. */
 	Node *base = fs->base;
 	unsigned diff = compare_styles(&fs->style, &base->style);
 	if (diff != 0) {
 		if ((diff & STYLECMP_MUST_RETOKENIZE) != 0)
-			base->flags |= NFLAG_REBUILD_INLINE_CONTEXT;
-		if ((diff & STYLECMP_MUST_RETOKENIZE) != 0)
-			base->flags |= NFLAG_REMEASURE_INLINE_TOKENS;
-		if ((diff & STYLECMP_MUST_REPAINT) != 0) 
-			base->flags |= NFLAG_UPDATE_TEXT_LAYERS;
+			base->t.flags |= NFLAG_RECONSTRUCT_PARAGRAPH;
+		if ((diff & STYLECMP_MUST_REMEASURE) != 0)
+			base->t.flags |= NFLAG_REMEASURE_PARAGRAPH_ELEMENTS;
 		base->style = fs->style;
 	}
 }
@@ -793,8 +792,9 @@ static void afs_finalize(AttributeFoldingState *fs)
  * the start of the node's attribute buffer. */
 static bool refold_attributes(Document *document, Node *base)
 {
-	if ((base->flags & NFLAG_FOLD_ATTRIBUTES) == 0 && 
-		(base->parent == NULL || !refold_attributes(document, base->parent)))
+	if ((base->t.flags & NFLAG_FOLD_ATTRIBUTES) == 0 && 
+		(base->t.parent.node == NULL || 
+			!refold_attributes(document, base->t.parent.node)))
 		return false;
 	AttributeFoldingState fs;
 	afs_init(&fs, base);
@@ -802,7 +802,7 @@ static bool refold_attributes(Document *document, Node *base)
 	afs_sort_modifiers(&fs);
 	afs_reduce(&fs);
 	afs_finalize(&fs);
-	base->flags &= ~NFLAG_FOLD_ATTRIBUTES;
+	base->t.flags &= ~NFLAG_FOLD_ATTRIBUTES;
 	return true;
 }
 
@@ -817,39 +817,46 @@ void attribute_changed(Document *document, Node *node, int name)
 		set_node_flags(document, node, NFLAG_UPDATE_RULE_KEYS, true);
 }
 
-/*
- * Node Tree
- */
-
- /* Returns the tree successor of 'node', not descending into children, and
-  * stopping at 'root'. */
-const Node *tree_next_up(const Document *document, const Node *root, 
-	const Node *node)
+/* Like tree_next(), but only descends into nodes with inline layout. */
+const Node *inline_next(const Node *container, const Node *node)
 {
-	document;
-	while (node != NULL && node != root) {
-		if (node->next_sibling != NULL)
-			return node->next_sibling;
-		node = node->parent;
-	}
-	return NULL;
+	return (node->layout == LAYOUT_INLINE || node == container) ? 
+		(const Node *)tree_next(&container->t, &node->t) :
+		(const Node *)tree_next_up(&container->t, &node->t);
 }
 
-/* Yields nodes in a subtree in preorder, stopping at 'root'. */
-const Node *tree_next(const Document *document, const Node *root, 
-	const Node *node)
+/* Returns the first node in an inline container that generated one or more
+ * paragraph elements. */
+const Node *inline_first_nonempty(const Node *container)
 {
-	return (node != NULL && node->first_child != NULL) ? 
-		node->first_child : tree_next_up(document, root, node);
+	if ((container->t.flags & NFLAG_HAS_PARAGRAPH_ELEMENTS) != 0)
+		return container;
+	const Node *child = container->t.first.node;
+	while (child != NULL && (child->t.flags & NFLAG_HAS_PARAGRAPH_ELEMENTS) == 0)
+		child = inline_next(container, child);
+	return child;
 }
 
-/* Returns nodes in preorder, not descending into nodes that establish a layout 
- * context. */
-const Node *inline_next(const Document *document, const Node *root,
-	const Node *node)
+/* Returns the next child inside an inline container that contributes one or
+ * more paragraph elements. */
+const Node *inline_next_nonempty(const Node *container, const Node *node)
 {
-	return (node != NULL && (node->layout == LAYOUT_INLINE || node == root)) ? 
-		tree_next(document, root, node) : tree_next_up(document, root, node);
+	do {
+		node = inline_next(container, node);
+	} while (node != NULL && node->layout == LAYOUT_INLINE && 
+		(node->t.flags & NFLAG_HAS_PARAGRAPH_ELEMENTS) == 0);
+	return node;
+}
+
+/* Iterates over the children of an inline container, skipping over nested
+ * block and inline nodes. */
+const Node *inline_next_no_objects(const Node *container, const Node *node)
+{
+	do {
+		node = (const Node *)tree_next(&container->t, 
+			&node->t);
+	} while (node != NULL && node->layout != LAYOUT_INLINE);
+	return node;
 }
 
 /* Returns the axis a node's main box should have. */
@@ -920,7 +927,7 @@ static Layout established_layout(const Document *document,
 	if (requested == LAYOUT_NONE || requested == LAYOUT_BLOCK)
 		return requested;
 	/* Find the first block or inline node in the parent chain. */
-	for (node = node->parent; node != NULL; node = node->parent) {
+	for (node = node->t.parent.node; node != NULL; node = node->t.parent.node) {
 		Layout parent_layout = (Layout)node->layout;
 		switch (parent_layout) {
 			case LAYOUT_NONE:
@@ -943,16 +950,14 @@ void remove_from_parent(Document *document, Node *child)
 {
 	document;
 
-	Node *parent = child->parent;
+	Node *parent = child->t.parent.node;
 	if (parent != NULL) {
 		propagate_expansion_flags(child, AXIS_BIT_H | AXIS_BIT_V);
-		list_remove((void **)&parent->first_child, (void **)&parent->last_child, 
-			child, 	offsetof(Node, prev_sibling));
-		parent->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
+		tree_remove_from_parent(&parent->t, &child->t);
+		parent->t.flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
 		document_notify_node_changed(document, parent);
-		child->parent = NULL;
 	}
-	child->flags |= NFLAG_PARENT_CHANGED | NFLAG_FOLD_ATTRIBUTES;
+	child->t.flags |= NFLAG_PARENT_CHANGED | NFLAG_FOLD_ATTRIBUTES;
 	document->change_clock++;
 	document_notify_node_changed(document, child);
 }
@@ -961,14 +966,11 @@ void insert_child_before(Document *document, Node *parent, Node *child,
 	Node *before)
 {
 	remove_from_parent(document, child);
-	list_insert_before(
-		(void **)&parent->first_child, 
-		(void **)&parent->last_child, 
-		child, before, offsetof(Node, prev_sibling));
-	child->parent = parent;
-	parent->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
+	tree_insert_child_before(&parent->t, &child->t, 
+		before != NULL ? &before->t : NULL);
+	parent->t.flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
 	propagate_expansion_flags(child, AXIS_BIT_H | AXIS_BIT_V);
-	child->flags |= NFLAG_PARENT_CHANGED | NFLAG_FOLD_ATTRIBUTES;
+	child->t.flags |= NFLAG_PARENT_CHANGED | NFLAG_FOLD_ATTRIBUTES;
 	document->change_clock++;
 	document_notify_node_changed(document, parent);
 }
@@ -980,27 +982,27 @@ void append_child(Document *document, Node *parent, Node *child)
 
 void prepend_child(Document *document, Node *parent, Node *child)
 {
-	insert_child_before(document, parent, child, parent->first_child);
+	insert_child_before(document, parent, child, parent->t.first.node);
 }
 
 /* Sets expansion flags in the parent chain of 'child'. This function is called
  * to indicate that size of 'child' has changed on the specified axes. */
 void propagate_expansion_flags(Node *child, unsigned axes)
 {
-	Node *parent = child->parent;
+	Node *parent = child->t.parent.node;
 	while (parent != NULL) {
 		Axis parent_axis = structural_axis((NodeType)parent->type);
 		if (((1 << parent_axis) & axes) != 0 && 
-			parent->first_child != parent->last_child) {
+			parent->t.first.node != parent->t.last.node) {
 			unsigned flags = 0;
-			if (child == parent->first_child)
+			if (child == parent->t.first.node)
 				flags |= NFLAG_EXPANDED_LEFT;
-			if (child == parent->last_child)
+			if (child == parent->t.last.node)
 				flags |= NFLAG_EXPANDED_RIGHT;
-			parent->flags |= flags << (2 * parent_axis);
+			parent->t.flags |= flags << (2 * parent_axis);
 		}
 		child = parent;
-		parent = child->parent;
+		parent = child->t.parent.node;
 	}
 }
 
@@ -1010,56 +1012,19 @@ static void notify_expansion(Document *document, Node *node)
 {
 	Message message;
 	message.type = MSG_NODE_EXPANDED;
-	message.flags = (node->flags & NFLAG_EXPANSION_MASK) / NFLAG_EXPANDED_LEFT;
+	message.flags = (node->t.flags & NFLAG_EXPANSION_MASK) / NFLAG_EXPANDED_LEFT;
 	message.expansion.node = node;
 	enqueue_message(document, &message);
-	node->flags &= ~NFLAG_EXPANSION_MASK;
+	node->t.flags &= ~NFLAG_EXPANSION_MASK;
 }
-
-/* Returns the first node in the parent chain of 'child', including 'child'
- * itself, that is an immediate child of 'parent'. */
-static const Node *find_immediate_child(const Node *child, const Node *parent)
-{
-	while (child != NULL && child->parent != parent)
-		child = child->parent;
-	return child;
-}
-
-/* True if 'child' is in the subtree of 'parent'. */
-bool is_child(const Node *child, const Node *parent)
-{
-	return find_immediate_child(child, parent) != NULL;
-}
-
 
 /* True if a flag is set on 'node' or any of its parents. */
 bool is_flag_set_in_parent(const Node *node, unsigned mask)
 {
 	while (node != NULL) {
-		if ((node->flags & mask) != 0)
+		if ((node->t.flags & mask) != 0)
 			return true;
-		node = node->parent;
-	}
-	return false;
-}
-
-/* True if A is before B in the tree. */
-bool node_before(const Node *a, const Node *b)
-{
-	const Node *ba, *bb;
-	const Node *ancestor = (const Node *)lowest_common_ancestor(
-		(const void *)a, 
-		(const void *)b, 
-		(const void **)&ba, 
-		(const void **)&bb,
-		offsetof(Node, parent));
-	ensure(ancestor != NULL); /* Undefined if A and B are not in the same tree. */
-	if (ancestor == b) return false; /* A is a child of B or A = B. */
-	if (ancestor == a) return true; /* B is a child of A. */
-	while (ba != NULL) {
-		if (ba == bb)
-			return true;
-		ba = ba->next_sibling;
+		node = node->t.parent.node;
 	}
 	return false;
 }
@@ -1100,7 +1065,7 @@ static void update_node_debug_string(Document *document, Node *node)
 #endif
 }
 
-unsigned make_node_debug_string(const Document *document, 
+unsigned make_node_debug_string(const Document *, 
 	const Node *node, char *buffer, unsigned buffer_size)
 {
 	static const unsigned TEXT_SAMPLE_CHARS = 20;
@@ -1108,12 +1073,16 @@ unsigned make_node_debug_string(const Document *document,
 
 	const char *rt = NULL;
 	unsigned rt_length = 0;
-	for (const Node *child = node; child != NULL && rt_length == 0; 
-		child = tree_next(document, node, child)) {
+	for (const Node *child = node; child != NULL; ) {
 		rt = child->text;
 		rt_length = child->text_length;
+		if (rt_length != 0)
+			break;
+		child = (const Node *)tree_next(&node->t, 
+			&child->t);
 	}
-	char *suffix = "";
+
+	char *suffix = (char *)"";
 	if (rt_length != 0) {
 		suffix = new char[rt_length + 1 + SUFFIX_EXTRA];
 		unsigned suffix_length = 0;
@@ -1123,21 +1092,17 @@ unsigned make_node_debug_string(const Document *document,
 			suffix[suffix_length++] = '>';
 		suffix[suffix_length++] = '"';
 		for (unsigned i = 0; i < rt_length && i < TEXT_SAMPLE_CHARS; ++i) {
-			char ch = rt[i];
+			uint8_t ch = rt[i];
 			if (ch == '\n' || ch == '\r')
 				ch = ' ';
 			suffix[suffix_length++] = ch;
 		}
-		suffix[suffix_length++] = '"';
-		suffix[suffix_length++] = '.';
-		suffix[suffix_length++] = '.';
-		suffix[suffix_length++] = '.';
-		suffix[suffix_length++] = ']';
-		suffix[suffix_length] = '\0';
+		strcpy((char *)(suffix + suffix_length), "\"...]");
+		suffix_length += 5;
 	}
 	int length = snprintf(buffer, buffer_size, "%s/%s%s", 
 		NODE_TYPE_STRINGS[node->type], 
-		TOKEN_STRINGS[node->token],
+		TOKEN_STRINGS[node->token], 
 		suffix);
 	if (rt_length != 0)
 		delete [] suffix;
@@ -1210,40 +1175,26 @@ int create_node(Node **result, Document *document, NodeType type, int tag_name,
 	bytes_required += text_length + 1;
 
 	/* Initialize the header. */
-	char * block = new char[bytes_required];
+	char *block = new char[bytes_required];
 	Node *node = (Node *)block;
 	block += sizeof(Node);
+	tree_init(&node->t, DEFAULT_NODE_FLAGS);
 	node->document = document;
 	node->type = (uint8_t)type;
 	node->layout = (uint8_t)LAYOUT_NONE;
 	node->current_layout = (uint8_t)LAYOUT_NONE;
 	node->target_layout = (uint8_t)LAYOUT_NONE;
 	node->token = (uint8_t)tag_name;
-	node->flags = 
-		NFLAG_PARENT_CHANGED | 
-		NFLAG_UPDATE_TEXT_LAYERS | 
-		NFLAG_UPDATE_BACKGROUND_LAYERS | 
-		NFLAG_FOLD_ATTRIBUTES |
-		NFLAG_REBUILD_BOXES | 
-		NFLAG_UPDATE_MATCHED_RULES |
-		NFLAG_HAS_STATIC_TEXT |
-		NFLAG_HAS_STATIC_RULE_KEYS;
 	node->num_rule_keys = (uint8_t)num_rule_keys;
 	node->rule_key_capacity = (uint8_t)rule_key_capacity;
 	node->num_matched_rules = 0;
-	node->first_child = NULL;
-	node->last_child = NULL;
-	node->next_sibling = NULL;
-	node->prev_sibling = NULL;
-	node->parent = NULL;
 	node->hit_prev = NULL;
 	node->hit_next = NULL;
 	node->selection_prev = NULL;
 	node->selection_next = NULL;
 	node->text_length = text_length;
-	node->box = NULL;
 	node->layers = NULL;
-	node->inline_context = NULL;
+	node->icb = NULL;
 	node->style = DEFAULT_NODE_STYLE;
 	
 	/* Copy in the node's text. */
@@ -1280,7 +1231,7 @@ void destroy_node(Document *document, Node *node, bool recursive)
 {
 	document->system->total_nodes--;
 	document_notify_node_destroy(document, node);
-	if (node->inline_context != NULL)
+	if (node->icb != NULL)
 		destroy_inline_context(document, node);
 	remove_from_parent(document, node);
 	destroy_node_boxes(document, node);
@@ -1289,49 +1240,41 @@ void destroy_node(Document *document, Node *node, bool recursive)
 	if (recursive) {
 		destroy_children(document, node);
 	} else {
-		for (Node *child = node->first_child; child != NULL; 
-			child = child->next_sibling)
-			child->parent = NULL;
+		for (Node *child = node->t.first.node; child != NULL; 
+			child = child->t.next.node)
+			child->t.parent.node = NULL;
 	}
 	abuf_clear(&node->attributes);
-	if ((node->flags & NFLAG_HAS_STATIC_RULE_KEYS) == 0)
+	if ((node->t.flags & NFLAG_HAS_STATIC_RULE_KEYS) == 0)
 		delete [] node->rule_keys;
-	if ((node->flags & NFLAG_HAS_STATIC_TEXT) == 0)
+	if ((node->t.flags & NFLAG_HAS_STATIC_TEXT) == 0)
 		delete [] node->text;
 	delete [] (char *)node;
 }
 
 void destroy_children(Document *document, Node *node)
 {
-	for (Node *child = node->first_child, *next; child != NULL; child = next) {
-		next = child->next_sibling;
+	for (Node *child = node->t.first.node, *next; child != NULL; child = next) {
+		next = child->t.next.node;
 		destroy_node(document, child, true);
 	}
 }
 
 static void destroy_node_boxes(Document *document, Node *node)
 {
-	if (node->box == NULL)
-		return;
-	if (node->current_layout == LAYOUT_INLINE_CONTAINER) {
-		/* A text container owns its container box and the line boxes, which are
-		 * the container box's immediate children. Its text boxes are destroyed
-		 * with the inline context. */
-		destroy_sibling_chain(document, node->box->first_child, false);
-		destroy_box(document, node->box, false);
-		node->box = NULL;
-	} else {
-		destroy_owner_chain(document, node->box, false);
-		node->box = NULL;
+	Box *box = node->t.counterpart.box;
+	if (box != NULL) {
+		destroy_box(document, box, false);
+		node->t.counterpart.box = NULL;
 	}
 }
 
 /* Sets or clears a mask of node flags. */
 void set_node_flags(Document *document, Node *node, unsigned mask, bool value)
 {
-	unsigned new_flags = set_or_clear(node->flags, mask, value);
-	unsigned changed = node->flags ^ new_flags;
-	node->flags = new_flags;
+	unsigned new_flags = set_or_clear(node->t.flags, mask, value);
+	unsigned changed = node->t.flags ^ new_flags;
+	node->t.flags = new_flags;
 	if (changed != 0)
 		document->change_clock++;
 }
@@ -1362,9 +1305,9 @@ static void remove_node_layer(Document *document, Node *node, VisualLayer *layer
 bool must_update_rule_keys(const Node *node)
 {
 	unsigned mask = NFLAG_UPDATE_RULE_KEYS | NFLAG_UPDATE_MATCHED_RULES;
-	if ((node->flags & mask) != 0)
+	if ((node->t.flags & mask) != 0)
 		return true;
-	return is_flag_set_in_parent(node->parent, mask | NFLAG_UPDATE_CHILD_RULES);
+	return is_flag_set_in_parent(node->t.parent.node, mask | NFLAG_UPDATE_CHILD_RULES);
 }
 
 /* Updates the list of rule table keys identifying selectors a node can 
@@ -1387,18 +1330,18 @@ static void update_node_rule_keys(Document *document, Node *node,
 	}
 	
 	unsigned num_keys = make_node_rule_keys(document->system, 
-		(Token)node->token, node->flags, cls, cls_length, 
+		(Token)node->token, node->t.flags, cls, cls_length, 
 		keys, MAX_NODE_RULE_KEYS);
 	if (num_keys > node->rule_key_capacity) {
-		if ((node->flags & NFLAG_HAS_STATIC_RULE_KEYS) == 0)
+		if ((node->t.flags & NFLAG_HAS_STATIC_RULE_KEYS) == 0)
 			delete [] node->rule_keys;
 		node->rule_keys = new uint64_t[num_keys];
-		node->flags &= ~NFLAG_HAS_STATIC_RULE_KEYS;
+		node->t.flags &= ~NFLAG_HAS_STATIC_RULE_KEYS;
 	}
 	memcpy(node->rule_keys, keys, num_keys * sizeof(uint64_t));
 	node->num_rule_keys = (uint8_t)num_keys;
 	node->rule_key_capacity = (uint8_t)num_keys;
-	node->flags &= ~NFLAG_UPDATE_RULE_KEYS;
+	node->t.flags &= ~NFLAG_UPDATE_RULE_KEYS;
 }
 
 /* Rebuilds a node's array of matched rule references. */
@@ -1408,7 +1351,7 @@ static bool update_rule_slots(Document *document, Node *node)
 	unsigned num_matched = match_rules(document, node, 
 		matched, NUM_RULE_SLOTS, &document->rules, 
 		&document->system->global_rules);
-	bool changed = num_matched != node->num_matched_rules;
+	bool changed = (num_matched != node->num_matched_rules);
 	unsigned i;
 	for (i = 0; i < num_matched; ++i) {
 		RuleSlot *slot = node->rule_slots + i;
@@ -1419,9 +1362,9 @@ static bool update_rule_slots(Document *document, Node *node)
 		}
 	}
 	node->num_matched_rules = (uint8_t)num_matched;
-	node->flags &= ~NFLAG_UPDATE_MATCHED_RULES;
+	node->t.flags &= ~NFLAG_UPDATE_MATCHED_RULES;
 	if (changed) 
-		node->flags |= NFLAG_FOLD_ATTRIBUTES;
+		node->t.flags |= NFLAG_FOLD_ATTRIBUTES;
 	return changed;
 }
 
@@ -1439,7 +1382,7 @@ static void check_rule_slots(Document *document, Node *node)
 		}
 	}
 	if (rules_changed)
-		node->flags |= NFLAG_FOLD_ATTRIBUTES;
+		node->t.flags |= NFLAG_FOLD_ATTRIBUTES;
 }
 
 /* If necessary, rebuilds a node's rule keys from its class attribute and 
@@ -1451,14 +1394,14 @@ static void check_rule_slots(Document *document, Node *node)
 void update_matched_rules(Document *document, Node *node)
 {
 	static const unsigned MAX_VISITED = 16;
-	
+
 	const Rule *visited[MAX_VISITED];
 	unsigned num_visited = 0;
  	bool ignore_class_modifiers = true;
 	do {
 		/* Rebuild the rule keys from the class attribute and rematch 
 		 * rules. */
-		if ((node->flags & NFLAG_UPDATE_RULE_KEYS) != 0)
+		if ((node->t.flags & NFLAG_UPDATE_RULE_KEYS) != 0)
 			update_node_rule_keys(document, node, ignore_class_modifiers);
 		if (!update_rule_slots(document, node))
 			break;
@@ -1476,11 +1419,11 @@ void update_matched_rules(Document *document, Node *node)
 					break;
 			if (j == num_visited) {
 				if (num_visited == MAX_VISITED) {
-					node->flags &= ~NFLAG_UPDATE_RULE_KEYS;
+					node->t.flags &= ~NFLAG_UPDATE_RULE_KEYS;
 					break;
 				}
 				visited[num_visited++] = rule;
-				node->flags |= NFLAG_UPDATE_RULE_KEYS;
+				node->t.flags |= NFLAG_UPDATE_RULE_KEYS;
 			} else {
 				quota--;
 			}
@@ -1489,11 +1432,11 @@ void update_matched_rules(Document *document, Node *node)
 		 * longer matched, we have a cycle, so give up. */
 		if (quota != 0)
 			break;
-	} while ((node->flags & NFLAG_UPDATE_RULE_KEYS) != 0);
+	} while ((node->t.flags & NFLAG_UPDATE_RULE_KEYS) != 0);
 
 	/* The children of this node may now match different rules, even if their
 	 * clasess haven't changed, because selectors can match parent nodes. */
-	node->flags |= NFLAG_UPDATE_CHILD_RULES;
+	node->t.flags |= NFLAG_UPDATE_CHILD_RULES;
 }
 
 /* Builds a LayerPosition structure by reading background attributes. */
@@ -1628,7 +1571,7 @@ static void handle_node_parent_changed(Document  *document, Node *node)
 {
 	document;
 	/* Effective layout depends on tree position. */
-	node->flags |= NFLAG_FOLD_ATTRIBUTES;
+	node->t.flags |= NFLAG_FOLD_ATTRIBUTES;
 }
 
 /* Synchronizes a node's background and image layers with its attributes. */
@@ -1640,12 +1583,13 @@ static void update_background_layers(Document *document, Node *node)
 
 
 /* Updates a node's selection highlight layers. */
-static void update_selection_layers(Document *document, Node *node)
+static void update_selection_layers(Document *, Node *node)
 {
 	if (node->layout == LAYOUT_INLINE_CONTAINER) {
-		update_inline_selection_layers(document, node);
-		node->flags &= ~NFLAG_UPDATE_SELECTION_LAYERS;
-		node->flags |= NFLAG_UPDATE_BOX_LAYERS;
+		/* FIXME(TJM): NYI */
+		// update_inline_selection_layers(document, node);
+		node->t.flags &= ~NFLAG_UPDATE_SELECTION_LAYERS;
+		node->t.flags |= NFLAG_UPDATE_BOX_LAYERS;
 	}
 }
 
@@ -1653,6 +1597,20 @@ static void update_selection_layers(Document *document, Node *node)
 bool is_enabled(const Node *node)
 {
 	return (node->style.flags & STYLE_ENABLED) != 0;
+}
+
+/* Sets or clears a bit on a node and box that's used to identify inline 
+ * containers during layout. */
+static void update_inline_container_bit(Node *node)
+{
+	bool value = (node->layout == LAYOUT_INLINE_CONTAINER);
+	node->t.flags = set_or_clear(node->t.flags, 
+		(unsigned)TREEFLAG_IS_INLINE_CONTAINER, value);
+	Box *box = node->t.counterpart.box;
+	if (box != NULL) {
+		box->t.flags = set_or_clear(box->t.flags, 
+			(unsigned)TREEFLAG_IS_INLINE_CONTAINER, value);
+	}
 }
 
 /* Checks for a change in a node's layout attribute and, if required, switches
@@ -1669,9 +1627,10 @@ static bool maybe_switch_layout(Document *document, Node *node,
 	if (new_layout != (Layout)node->layout) {
 		node->layout = (uint8_t)new_layout;
 		layout_changed = true;
+		update_inline_container_bit(node);
 	}
 	
-	/* If the node is being hidden, maybe cache the computed layout. */
+	/* If the node is being hidden, maybe retain the computed layout. */
 	Layout target = new_layout;
 	if (new_layout == LAYOUT_NONE && node->current_layout != LAYOUT_NONE && 
 		(document->system->flags & SYSFLAG_CACHE_HIDDEN_NODE_LAYOUTS) != 0)
@@ -1681,22 +1640,22 @@ static bool maybe_switch_layout(Document *document, Node *node,
 	bool target_changed = (target != (Layout)node->target_layout);
 	if (target_changed) {
 		node->target_layout = (uint8_t)target;
-		node->flags |= NFLAG_REBUILD_BOXES;
+		node->t.flags |= NFLAG_REBUILD_BOXES;
 	} else {
 		/* We're not changing target layout (meaning we're not rebuilding 
 		 * boxes), but if the node's actual layout changed, we still need to
 		 * tell the parent to recompose its child boxes, because this box may
 		 * need to be excluded if it has been hidden or included if it has been
 		 * shown. */
-		if (layout_changed && node->parent != NULL) 
-			node->parent->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
+		if (layout_changed && node->t.parent.node != NULL) 
+			node->t.parent.tree->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
 	}
 	return target_changed;
 }
 
 /* Returns the first node in a parent chain, including 'node' itself, that
- * establishes a layout context. */
-const Node *find_context_node(const Document *document, const Node *node)
+ * establishes layout. */
+const Node *find_layout_node(const Document *document, const Node *node)
 {
 	document;
 
@@ -1704,14 +1663,16 @@ const Node *find_context_node(const Document *document, const Node *node)
 	if (node == NULL || node->layout == LAYOUT_INLINE_CONTAINER)
 		return node;
 
-	/* Find the first non-LCTX_NONE node in the parent chain. */
+	/* Find the first block or inline container node in the parent chain. */
 	const Node *context;
-	for (context = node->parent; context != NULL; context = context->parent) {
-		if (context->layout != LAYOUT_INLINE) {
-			/* A block inside an inline uses the inline as its context, whereas
-			 * a block inside a block defines its own context. */
+	for (context = node->t.parent.node; context != NULL; context = context->t.parent.node) {
+		if (context->layout != LAYOUT_NONE && 
+		    context->layout != LAYOUT_INLINE) {
+			/* A block inside an inline container is part of the inline 
+			 * container's layout, while a block inside a block establishes its 
+			 * own layout. */
 			if (context->layout == LAYOUT_BLOCK && node->layout == LAYOUT_BLOCK)
-				return node;
+				context = node;
 			break;
 		}
 	}
@@ -1722,7 +1683,16 @@ const Node *find_context_node(const Document *document, const Node *node)
  * Always returns NULL for inline containters themselves. */
 const Node *find_inline_container(const Document *document, const Node *node)
 {
-	const Node *context = find_context_node(document, node);
+	const Node *context = find_layout_node(document, node);
+	return (context != NULL && context->layout == LAYOUT_INLINE_CONTAINER) ? 
+		context : NULL;
+}
+
+/* If 'node' is an inline child, returns its inline container, otherwise NULL.
+ * Always returns NULL for inline containters themselves. */
+const Node *find_inline_container_not_self(const Document *document, const Node *node)
+{
+	const Node *context = find_layout_node(document, node);
 	return (context != NULL && context != node && 
 		context->layout == LAYOUT_INLINE_CONTAINER) ? context : NULL;
 }
@@ -1731,33 +1701,18 @@ const Node *find_inline_container(const Document *document, const Node *node)
  * find_inline_container() will return non-null only if the node is an inline
  * child, this method will return the ultimate container for nodes nested in
  * blocks inside an inline container. */
-const Node *find_chain_inline_container(const Document *document, 
-	const Node *node)
+const Node *find_chain_inline_container(const Document *, const Node *node)
 {
-	document;
-	const Node *container = node->parent;
+	const Node *container = node->t.parent.node;
 	while (container != NULL && container->layout != LAYOUT_INLINE_CONTAINER)
-		container = container->parent;
+		container = container->t.parent.node;
 	return container;
-}
-
-/* Update the layers on inline context nodes responsible for rendering the
- * text of their children.*/
-static void update_text_layer(Document *document, Node *node)
-{
-	if (node->layout != LAYOUT_INLINE_CONTAINER)
-		return;
-	VisualLayer *text_stack = build_text_layer_stack(document, node);
-	VisualLayer *old_stack = layer_chain_replace(VLCHAIN_NODE, &node->layers,
-		LKEY_TEXT, text_stack);
-	release_layer_chain(document, VLCHAIN_NODE, old_stack);
 }
 
 /* Rebuilds a node's box's layer stack. */
 static void update_node_box_layers(Document *document, Node *node)
 {
-	document;
-	Box *box = node->box;
+	Box *box = node->t.counterpart.box;
 	if (box == NULL)
 		return;
 	release_layer_chain(document, VLCHAIN_BOX, box->layers);
@@ -1768,7 +1723,7 @@ static void update_node_box_layers(Document *document, Node *node)
 		box->depth_interval = (uint16_t)depth_interval;
 		do {
 			box->layout_flags &= ~BLFLAG_TREE_CLIP_VALID;
-			box = box->parent;
+			box = box->t.parent.box;
 		} while (box != NULL);
 	}
 }
@@ -1777,11 +1732,11 @@ static void update_node_box_layers(Document *document, Node *node)
 void set_interaction_state(Document *document, Node *node, 
 	unsigned mask, bool value)
 {
-	node->flags = set_or_clear(node->flags, mask, value);
+	node->t.flags = set_or_clear(node->t.flags, mask, value);
 	/* Interation bits cause pseudo-classes to appear and disappear on the
 	 * node. This might result in the node or any of its children matching
 	 * different rules. */
-	node->flags |= NFLAG_UPDATE_RULE_KEYS | NFLAG_UPDATE_MATCHED_RULES;
+	node->t.flags |= NFLAG_UPDATE_RULE_KEYS | NFLAG_UPDATE_MATCHED_RULES;
 	document->change_clock++;
 }
 
@@ -1805,31 +1760,33 @@ static void update_node_boxes(Document *document, Node *node)
 			set_box_debug_string(container, "%s block \"%s\"", 
 				NODE_TYPE_STRINGS[(NodeType)node->type],
 				random_word((uintptr_t)node));
+			if (target == LAYOUT_INLINE_CONTAINER)
+				container->t.flags |= TREEFLAG_IS_INLINE_CONTAINER;
 		}
-		node->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
-		if (node->parent != NULL)
-			node->flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
+		node->t.flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
+		if (node->t.parent.node != NULL)
+			node->t.flags |= NFLAG_RECOMPOSE_CHILD_BOXES;
 	} else {
-		container = node->box;
+		container = node->t.counterpart.box;
 	}
 	/* Update the box's properties, assuming all corresponding node attributes
 	 * have changed. */
 	if (needs_container) {
 		Axis axis = structural_axis((NodeType)node->type);
 		configure_container_box(document, node, axis, container);
-		node->box = container;
+		node->t.counterpart.box = container;
 	}
-	/* Make sure the node has an inline context if it needs one. */
-	if (target == LAYOUT_INLINE_CONTAINER && node->inline_context == NULL)
-		node->flags |= NFLAG_REBUILD_INLINE_CONTEXT;
+	/* Make sure the node has an ICB if it needs one. */
+	if (target == LAYOUT_INLINE_CONTAINER && node->icb == NULL)
+		node->t.flags |= NFLAG_RECONSTRUCT_PARAGRAPH;
 	node->current_layout = (uint8_t)target;
-	node->flags &= ~NFLAG_REBUILD_BOXES;
+	node->t.flags &= ~NFLAG_REBUILD_BOXES;
 }
 
 /* Attaches the boxes of child nodes to the box tree of this node. */
 static void compose_child_boxes(Document *document, Node *node)
 {
-	Box *box = node->box;
+	Box *box = node->t.counterpart.box;
 	if (box == NULL)
 		return;
 
@@ -1839,30 +1796,29 @@ static void compose_child_boxes(Document *document, Node *node)
 
 	/* Add the boxes of all child nodes as children of our box. */
 	remove_all_children(document, box);
-	for (Node *child = node->first_child; child != NULL; 
-		child = child->next_sibling) {
+	for (Node *child = node->t.first.node; child != NULL; 
+		child = child->t.next.node) {
 		if (child->layout == LAYOUT_NONE)
 			continue;
-		Box *child_box = child->box;
+		Box *child_box = child->t.counterpart.box;
 		if (child_box != NULL)
 			append_child(document, box, child_box);
 	}
 }
 
-/* Recursively updates nodes before layout. */
-unsigned update_nodes_pre_layout(Document *document, Node *node, 
-	unsigned propagate_down, bool rule_tables_changed)
+/* Updates a node before layout. Parents are visited before children. */
+unsigned update_node_pre_layout_preorder(Document *document, Node *node, 
+	unsigned propagate_down)
 {
-	unsigned propagate_up = 0;
-	node->flags |= propagate_down;
+	node->t.flags |= propagate_down;
 
 	update_node_debug_string(document, node);
 
 	/* Rematch rules and/or rebuild rule keys for this node if its classes or 
 	 * the contents of the rule tables have changed. */
-	if (rule_tables_changed)
-		node->flags |= NFLAG_UPDATE_MATCHED_RULES;
-	if ((node->flags & (NFLAG_UPDATE_RULE_KEYS | 
+	if ((document->flags & DOCFLAG_UPDATE_REMATCH_RULES) != 0)
+		node->t.flags |= NFLAG_UPDATE_MATCHED_RULES;
+	if ((node->t.flags & (NFLAG_UPDATE_RULE_KEYS | 
 		NFLAG_UPDATE_MATCHED_RULES)) != 0) {
 		update_matched_rules(document, node);
 		propagate_down |= NFLAG_UPDATE_MATCHED_RULES;
@@ -1870,16 +1826,17 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 	check_rule_slots(document, node);
 	
 	/* Recursively rematch child rules if required. */
-	if ((node->flags & NFLAG_UPDATE_CHILD_RULES) != 0) {
+	if ((node->t.flags & NFLAG_UPDATE_CHILD_RULES) != 0) {
 		propagate_down |= NFLAG_UPDATE_MATCHED_RULES;
-		node->flags &= ~NFLAG_UPDATE_CHILD_RULES;
+		node->t.flags &= ~NFLAG_UPDATE_CHILD_RULES;
 	}
 
-	if ((node->flags & NFLAG_PARENT_CHANGED) != 0) {
+	if ((node->t.flags & NFLAG_PARENT_CHANGED) != 0) {
 		handle_node_parent_changed(document, node);
-		node->flags &= ~NFLAG_PARENT_CHANGED;
-		node->flags |= NFLAG_FOLD_ATTRIBUTES | NFLAG_REBUILD_BOXES;
-		propagate_up |= NFLAG_REBUILD_INLINE_CONTEXT;
+		node->t.flags &= ~NFLAG_PARENT_CHANGED;
+		node->t.flags |= NFLAG_FOLD_ATTRIBUTES | NFLAG_REBUILD_BOXES;
+		if (node->t.parent.node != NULL)
+			node->t.parent.tree->flags |= NFLAG_RECONSTRUCT_PARAGRAPH;
 	}
 
 	/* Constrain the root after rule updates, so the padding is in place,
@@ -1889,87 +1846,76 @@ unsigned update_nodes_pre_layout(Document *document, Node *node,
 	
 	/* When a node's style is changed, the styles of its children must be 
 	 * recalculated. */
-	if ((node->flags & NFLAG_FOLD_ATTRIBUTES) != 0) {
+	if ((node->t.flags & NFLAG_FOLD_ATTRIBUTES) != 0) {
 		refold_attributes(document, node);
 		propagate_down |= NFLAG_FOLD_ATTRIBUTES;
 	}
 
-	if ((node->flags & NFLAG_UPDATE_BACKGROUND_LAYERS) != 0) {
+	if ((node->t.flags & NFLAG_UPDATE_BACKGROUND_LAYERS) != 0) {
 		update_background_layers(document, node);
-		node->flags &= ~NFLAG_UPDATE_BACKGROUND_LAYERS;
+		node->t.flags &= ~NFLAG_UPDATE_BACKGROUND_LAYERS;
 	}
 
-	/* Process our children. */
-	for (Node *child = node->first_child; child != NULL; 
-		child = child->next_sibling) {
-		propagate_up |= update_nodes_pre_layout(document, child, 
-			propagate_down, rule_tables_changed);
-	}
+	return propagate_down;
+}
 
-	/* Some flags propagate up automatically. */
-	propagate_up |= (node->flags & (NFLAG_UPDATE_TEXT_LAYERS | 
-		NFLAG_REMEASURE_INLINE_TOKENS | NFLAG_REBUILD_INLINE_CONTEXT));
-	node->flags |= propagate_up;
+/* Updates a node before layout. Children are visited before parents. */
+unsigned update_node_pre_layout_postorder(Document *document, Node *node, 
+	unsigned propagate_up)
+{
+	/* Propagate certain flags upwards. */
+	node->t.flags |= propagate_up;
+	propagate_up = node->t.flags & NFLAG_PROPAGATE_UP_MASK;
 
 	/* Rebuild this node's box. */
-	if ((node->flags & NFLAG_REBUILD_BOXES) != 0) {
+	if ((node->t.flags & NFLAG_REBUILD_BOXES) != 0) {
 		update_node_boxes(document, node);
-		propagate_up |= NFLAG_RECOMPOSE_CHILD_BOXES | NFLAG_UPDATE_TEXT_LAYERS;
+		propagate_up |= NFLAG_RECOMPOSE_CHILD_BOXES;
 	}
+	assertb(_heapchk() == _HEAPOK); /* FIXME: DEBUG. */
 
 	/* If we've rebuilt our own box tree, or child boxes have changed,
 	 * recompose the child boxes into our tree. */
-	if ((node->flags & NFLAG_RECOMPOSE_CHILD_BOXES) != 0) {
+	if ((node->t.flags & NFLAG_RECOMPOSE_CHILD_BOXES) != 0) {
 		compose_child_boxes(document, node);
-		node->flags &= ~NFLAG_RECOMPOSE_CHILD_BOXES;
+		node->t.flags &= ~NFLAG_RECOMPOSE_CHILD_BOXES;
 	}
+	assertb(_heapchk() == _HEAPOK); /* FIXME: DEBUG. */
+
+	/* Synchronize the box's layer stack with the node's. */
+	if ((node->t.flags & NFLAG_UPDATE_BOX_LAYERS) != 0) {
+		update_node_box_layers(document, node);
+		node->t.flags &= ~NFLAG_UPDATE_BOX_LAYERS;
+		if (node->layout == LAYOUT_INLINE)
+			propagate_up |= NFLAG_UPDATE_BOX_LAYERS;
+	}
+	assertb(_heapchk() == _HEAPOK); /* FIXME: DEBUG. */
 
 	/* Update inline contexts. */
 	if (node->layout == LAYOUT_INLINE_CONTAINER) {
-		if ((node->flags & NFLAG_REBUILD_INLINE_CONTEXT) != 0)
+		if ((node->t.flags & NFLAG_RECONSTRUCT_PARAGRAPH) != 0)
 			rebuild_inline_context(document, node);
-		if ((node->flags & NFLAG_REMEASURE_INLINE_TOKENS) != 0)
-			measure_inline_tokens(document, node);
+		assertb(_heapchk() == _HEAPOK); /* FIXME: DEBUG. */
 	} else {
-		propagate_up |= node->flags & (NFLAG_REBUILD_INLINE_CONTEXT | 
-			NFLAG_REMEASURE_INLINE_TOKENS | NFLAG_UPDATE_TEXT_LAYERS);
+		/* Propagate up to the nearest inline container. */
+		propagate_up |= node->t.flags & (NFLAG_RECONSTRUCT_PARAGRAPH | 
+			NFLAG_REMEASURE_PARAGRAPH_ELEMENTS);
 	}
-	node->flags &= ~(NFLAG_REBUILD_INLINE_CONTEXT | 
-		NFLAG_REMEASURE_INLINE_TOKENS);
+	assertb(_heapchk() == _HEAPOK); /* FIXME: DEBUG. */
 
 	return propagate_up;
 }
 
-/* Recursively updates nodes after layout. */
-unsigned update_nodes_post_layout(Document *document, Node *node, 
-	unsigned propagate_down)
+
+/* Updates a node after layout. Children are visited before parents. */
+unsigned update_node_post_layout_postorder(Document *document, Node *node, 
+	unsigned propagate_up)
 {
-	unsigned propagate_up = 0;
-	for (Node *child = node->first_child; child != NULL; 
-		child = child->next_sibling)
-		propagate_up |= update_nodes_post_layout(document, child, propagate_down);
-	unsigned flags = node->flags | propagate_down | propagate_up;
-	if ((flags & NFLAG_UPDATE_TEXT_LAYERS) != 0) {
-		update_text_layer(document, node);
-		node->flags &= ~NFLAG_UPDATE_TEXT_LAYERS;
-		flags |= NFLAG_UPDATE_BOX_LAYERS;
-		if (node->layout == LAYOUT_INLINE)
-			propagate_up |= NFLAG_UPDATE_TEXT_LAYERS;
-	}
-	if ((flags & NFLAG_UPDATE_SELECTION_LAYERS) != 0) {
-		update_selection_layers(document, node);
-		propagate_up |= NFLAG_UPDATE_SELECTION_LAYERS;
-	}
-	if ((flags & NFLAG_UPDATE_BOX_LAYERS) != 0) {
-		update_node_box_layers(document, node);
-		node->flags &= ~NFLAG_UPDATE_BOX_LAYERS;
-		if (node->layout == LAYOUT_INLINE)
-			propagate_up |= NFLAG_UPDATE_BOX_LAYERS;
-	}
+	unsigned flags = node->t.flags | propagate_up;
 	if ((flags & (NFLAG_WIDTH_CHANGED | NFLAG_HEIGHT_CHANGED)) != 0) {
-		if ((node->flags & NFLAG_NOTIFY_EXPANSION) != 0)
+		if ((node->t.flags & NFLAG_NOTIFY_EXPANSION) != 0)
 			notify_expansion(document, node);
-		node->flags &= ~(NFLAG_WIDTH_CHANGED | NFLAG_HEIGHT_CHANGED);
+		node->t.flags &= ~(NFLAG_WIDTH_CHANGED | NFLAG_HEIGHT_CHANGED);
 	}
 	return propagate_up;
 }

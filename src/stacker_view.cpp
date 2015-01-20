@@ -4,20 +4,34 @@
 
 #include "stacker.h"
 #include "stacker_shared.h"
+#include "stacker_encoding.h"
 #include "stacker_attribute.h"
 #include "stacker_util.h"
 #include "stacker_document.h"
 #include "stacker_box.h"
+#include "stacker_inline2.h"
 #include "stacker_layer.h"
 #include "stacker_system.h"
 #include "stacker_platform.h"
 
 namespace stkr {
 
-const uint16_t NOT_CLIPPED = 0xFFFF;
+const unsigned DEFAULT_VIEW_BOX_CAPACITY = 256;
+
+const uint16_t NO_BOX = 0xFFFF;
+
+const unsigned KEY_LAYER_BITS = 3;
+const unsigned KEY_LAYER_MASK = (1 << KEY_LAYER_BITS) - 1;
+
+/* An internal command representing a text layer. Will never appear in a final
+ * command list. */
+const DrawCommand DCMD_TEXT_LAYER = DrawCommand(DCMD_END + 1);
 
 const unsigned CLIP_MEMORY_SIZE = 4;
 
+/* A circular queue storing a smaller number of the most recently used clip
+ * rectangles. These rectangles can be referenced in subsequent clip commands,
+ * reducing the size of the command list. */
 struct ClipMemory {
 	float rectangles[CLIP_MEMORY_SIZE][4];
 	const ClipCommandData *data[CLIP_MEMORY_SIZE];
@@ -49,11 +63,17 @@ DrawCommand view_first_command(const View *view, ViewCommandIterator *iter,
 
 View *create_view(Document *document, unsigned flags)
 {
+	int id = allocate_view_id(document);
+	if (id == INVALID_VIEW_ID)
+		return NULL;
+
 	View *view = new View();
 	view->document = document;
+	view->id = id;
+	view->visibility_stamp = 0;
 	view->flags = flags;
 	std::fill(view->bounds, view->bounds + 4, 0.0f);
-	view->layout_clock = document->layout_clock - 1;
+	view->layout_clock = document->update_clock - 1;
 	view->paint_clock = unsigned(-1);
 	view->headers = NULL;
 	view->num_headers = 0;
@@ -62,6 +82,12 @@ View *create_view(Document *document, unsigned flags)
 	view->command_data = NULL;
 	view->command_data_size = 0;
 	view->command_data_capacity = 0;
+	view->boxes = NULL;
+	view->box_capacity = 0;
+	view->num_boxes = 0;
+
+	add_to_view_list(document, view);
+
 	return view;
 }
 
@@ -69,8 +95,11 @@ void destroy_view(View *view)
 {
 	if (view == view->document->selection_view)
 		clear_selection(view->document);
+	deallocate_view_id(view->document, view->id);
+	remove_from_view_list(view->document, view);
 	delete [] view->headers;
 	delete [] view->command_data;
+	delete [] view->boxes;
 	delete view;
 }
 
@@ -118,8 +147,7 @@ unsigned get_paint_clock(const View *view)
 {
 	unsigned paint_clock = view->paint_clock << 1;
 	paint_clock |= (unsigned)needs_update(view->document);
-	paint_clock |= (unsigned)(view->document->layout_clock != 
-		view->layout_clock);
+	paint_clock |= (unsigned)(view->document->update_clock != view->layout_clock);
 	return paint_clock;
 }
 
@@ -141,50 +169,76 @@ void set_view_bounds(View *view, float *bounds)
 	view->paint_clock++;
 }
 
-/* Updates the list of boxes that need to be drawn for a view. */
-static void view_build_box_list(View *view)
+static void allocate_box_list(View *view, unsigned new_capacity)
 {
-	unsigned box_capacity = std::max(view->boxes.capacity(), 
-		DEFAULT_VIEW_BOX_CAPACITY);
-	view->boxes.resize(box_capacity);
-	unsigned num_boxes = grid_query_rect(
-		view->document, &view->boxes[0], 
-		box_capacity, 
+	delete [] view->boxes;
+	view->boxes = new Box *[new_capacity];
+	view->box_capacity = new_capacity;
+}
+
+static void query_boxes(View *view)
+{
+	view->num_boxes = grid_query_rect(
+		view->document, 
+		view->boxes, 
+		view->box_capacity, 
 		rleft(view->bounds), 
 		rright(view->bounds), 
 		rtop(view->bounds), 
 		rbottom(view->bounds));
-	view->boxes.resize(num_boxes);
-	if (num_boxes > box_capacity) {
-		grid_query_rect(
-			view->document, &view->boxes[0], num_boxes, 
-			rleft(view->bounds), 
-			rright(view->bounds), 
-			rtop(view->bounds), 
-			rbottom(view->bounds));
+}
+
+/* Finds all the boxes visible in this view. */
+static void find_visible_boxes(View *view)
+{
+	if (view->box_capacity == 0)
+		allocate_box_list(view, DEFAULT_VIEW_BOX_CAPACITY);
+	query_boxes(view);
+	if (view->num_boxes > view->box_capacity) {
+		allocate_box_list(view, view->num_boxes);
+		query_boxes(view);
 	}
-	unsigned j = 0;
-	for (unsigned i = 0; i < num_boxes; ++i) {
-		const Box *box = view->boxes[i];
-		if (box->layers != NULL || (view->flags & VFLAG_DEBUG_MASK) != 0)
-			view->boxes[j++] = view->boxes[i];
+}
+
+/* Marks each box in the box list as visible in this view. */
+static void set_visibility_bits(View *view)
+{
+	unsigned visible_flag = 1 << BOXFLAG_VISIBLE_SHIFT << view->id;
+	for (unsigned i = 0; i < view->num_boxes; ++i) {
+		Box *box = view->boxes[i];
+		box_advise_visible(view->document, box, view);
+		box->t.flags |= visible_flag;
 	}
-	view->boxes.resize(j);
+}
+
+/* Updates the list of boxes that need to be drawn for a view. */
+static void view_update_box_list(View *view)
+{
+	find_visible_boxes(view);
+	set_visibility_bits(view);
+}
+
+inline unsigned make_command_key(int depth, int layer_key = 0)
+{
+	return (depth << KEY_LAYER_BITS) + layer_key;
+}
+
+inline unsigned make_command_key(int depth, const VisualLayer *layer)
+{
+	return make_command_key(depth + layer->depth_offset, layer->key);
 }
 
 /* Appends a command header to the command list. */
 static void view_add_command_header(View *view, DrawCommand command, 
-	const void *data, unsigned clip_index, int depth)
+	uintptr_t data_offset, int key, unsigned box_index)
 {
 	if (view->num_headers < view->header_capacity) {
-		uint32_t data_offset = data != NULL ? 
-			(const uint8_t *)data - view->command_data : 0;
 		DrawCommandHeader *header = view->headers + view->header_start + 
 			view->num_headers;
 		header->command = command;
+		header->key = key;
+		header->box_index = (uint16_t)box_index;
 		header->data_offset =  data_offset;
-		header->key = (int16_t)depth;
-		header->clip_index = (uint16_t)clip_index;
 	}
 	view->num_headers++;
 }
@@ -200,16 +254,63 @@ static void view_add_command_header(View *view, const DrawCommandHeader *header)
 /* Appends a command with the specified amount of associated data to the command
  * list. */
 static void *view_add_command(View *view, DrawCommand command,
-	uint32_t data_size, unsigned clip_index, int depth)
+	uint32_t data_size, int key, unsigned box_index)
 {
 	unsigned required = view->command_data_size + data_size;
 	void *data = view->command_data + view->command_data_size;
-	view_add_command_header(view, command, data, clip_index, depth);
+	view_add_command_header(view, command, view->command_data_size, key, 
+		box_index);
 	view->command_data_size = required;
 	return required <= view->command_data_capacity ? data : NULL;
 }
 
-/* Orders view command headers by depth, deepest first. */
+/* Helper to add a draw-text command. */
+static TextCommandData *view_add_text_command(View *view, 
+	unsigned num_code_units, unsigned num_characters, unsigned num_colors,
+	int16_t font_id, int key)
+{
+	const System *system = view->document->system;
+	bool multi_line = (system->flags & SYSFLAG_SINGLE_LINE_TEXT_LAYERS) == 0;
+
+	unsigned bytes_required = sizeof(TextCommandData);
+	unsigned text_bytes = (num_code_units + 1) *
+		BYTES_PER_CODE_UNIT[system->encoding];
+	bytes_required += text_bytes;
+	bytes_required += num_characters * sizeof(int); // X positions.
+	if (multi_line)
+		bytes_required += num_characters * sizeof(int); // Y positions.
+	bytes_required += num_colors * sizeof(uint32_t); // Colors.
+	bytes_required += num_colors * sizeof(uint32_t); // Color code unit counts.
+	bytes_required += num_colors * sizeof(uint32_t); // Color character counts.
+	char *block = (char *)view_add_command(view, DCMD_TEXT, bytes_required, key, NO_BOX);
+	if (block == NULL)
+		return NULL;
+
+	TextCommandData *d = (TextCommandData *)block;
+	block += sizeof(TextCommandData);
+	d->font_id = font_id;
+	d->length = num_characters;
+	d->num_colors = num_colors;
+	d->text.bytes = block;
+	block += text_bytes;
+	d->x_positions = (int *)block;
+	block += num_characters * sizeof(int);
+	if (multi_line) {
+		d->y_positions = (int *)block;
+		block += num_characters * sizeof(int);
+	} else {
+		d->line_y_position = 0;
+	}
+	d->colors = (uint32_t *)block;
+	block += num_colors * sizeof(uint32_t);
+	d->color_code_unit_counts = (uint32_t *)block;
+	block += num_colors * sizeof(uint32_t);
+	d->color_character_counts = (uint32_t *)block;
+	block += num_colors * sizeof(uint32_t);
+	return d;
+}
+
+/* Orders view command headers by they depth|type key, deepest first. */
 static void view_sort_commands(View *view)
 {
 	unsigned count = view->num_headers;
@@ -253,9 +354,9 @@ static void view_set_clip(View *view, ClipMemory *memory, const float *r)
 	}
 	if (i == memory->tail) {
 		ClipCommandData *cd = (ClipCommandData *)view_add_command(view, 
-			DCMD_SET_CLIP, sizeof(ClipCommandData), NOT_CLIPPED, 0);
+			DCMD_SET_CLIP, sizeof(ClipCommandData), 0, NO_BOX);
 		if (cd != NULL)
-			intersect(view->bounds, r, cd->clip);
+			rect_intersect(view->bounds, r, cd->clip);
 		unsigned next = (memory->tail + 1) % CLIP_MEMORY_SIZE;
 		if (next == memory->head)
 			memory->head = (memory->head + 1) % CLIP_MEMORY_SIZE;
@@ -263,21 +364,20 @@ static void view_set_clip(View *view, ClipMemory *memory, const float *r)
 		memcpy(memory->rectangles[memory->tail], r, 4 * sizeof(float));
 		memory->tail = next;
 	} else {
-		view_add_command_header(view, DCMD_SET_CLIP, 
-			(const ClipCommandData *)memory->data[i], 
-			NOT_CLIPPED, 0);
+		uintptr_t offset = (uint8_t *)memory->data[i] - view->command_data;
+		view_add_command_header(view, DCMD_SET_CLIP, offset, 0, NO_BOX);
 	}
 }
 
 /* Adds drawing commands for a pane layer. */
-static void view_add_pane_commands(View *view, unsigned clip_index, 
+static void view_add_pane_commands(View *view, unsigned box_index, 
 	const VisualLayer *layer, int depth)
 {
-	const Box *box = view->boxes[clip_index];
+	const Box *box = view->boxes[box_index];
 	if (layer->pane.pane_type == PANE_FLAT) {
+		unsigned key = make_command_key(depth, layer);
 		RectangleCommandData *d = (RectangleCommandData *)view_add_command(
-			view, DCMD_RECTANGLE, sizeof(RectangleCommandData), 
-			clip_index, depth + layer->depth_offset);
+			view, DCMD_RECTANGLE, sizeof(RectangleCommandData), key, box_index);
 		if (d == NULL)
 			return;
 		compute_layer_position(box, &layer->pane.position, d->bounds);
@@ -292,7 +392,7 @@ static void view_add_pane_commands(View *view, unsigned clip_index,
 }
 
 /* Adds drawing commands for an image layer. */
-static void view_add_image_commands(View *view, unsigned clip_index,
+static void view_add_image_commands(View *view, unsigned box_index,
 	const VisualLayer *layer, int depth)
 {
 	/* Are we still waiting for the image? */
@@ -300,8 +400,9 @@ static void view_add_image_commands(View *view, unsigned clip_index,
 		return;
 
 	/* Add an image command. */
+	unsigned key = make_command_key(depth, layer);
 	ImageCommandData *d = (ImageCommandData *)view_add_command(view, DCMD_IMAGE,
-		sizeof(ImageCommandData), clip_index, depth + layer->depth_offset);
+		sizeof(ImageCommandData), key, box_index);
 	if (d == NULL)
 		return;
 
@@ -320,30 +421,20 @@ static void view_add_image_commands(View *view, unsigned clip_index,
 	bool has_natural_size = platform_get_network_image_info(back_end, 
 		cache, il->image_handle, &natural_width, &natural_height);
 
-	const Box *box = view->boxes[clip_index];
+	const Box *box = view->boxes[box_index];
 	compute_layer_position(box, &layer->image.position, d->bounds, 
 		(float)natural_width, (float)natural_height, has_natural_size);
 }
 
-static void view_add_text_commands(View *view, unsigned clip_index, 
+static void view_add_text_layer_commands(View *view, unsigned box_index, 
 	const VisualLayer *layer, int depth)
 {
-	TextCommandData *d = (TextCommandData *)view_add_command(
-		view, DCMD_TEXT, sizeof(TextCommandData), 
-		clip_index, depth + layer->depth_offset);
-	if (d == NULL)
-		return;
-	d->text = get_text_layer_text(layer);
-	d->flags = get_text_layer_flags(layer);
-	d->positions = get_text_layer_positions(layer);
-	d->palette = get_text_layer_palette(layer);
-	d->length = layer->text.length;
-	d->num_colors = layer->text.num_colors;
-	d->key = layer->text.key;
-	d->font_id = layer->text.font_id;
+	unsigned key = make_command_key(depth, layer);
+	uintptr_t data_offset = (uintptr_t)layer;
+	view_add_command_header(view, DCMD_TEXT_LAYER, data_offset, key, box_index);
 }
 
-static void view_add_box_layer_commands(View *view, unsigned clip_index)
+static void view_add_box_layer_commands(View *view, int clip_index)
 {
 	const Box *box = view->boxes[clip_index];
 	if (box->layers == NULL)
@@ -354,7 +445,6 @@ static void view_add_box_layer_commands(View *view, unsigned clip_index)
 		layer = layer->next[VLCHAIN_BOX]) {
 		depth += ((LayerKey)layer->key != last_key);
 		last_key = (LayerKey)layer->key;
-
 		switch (layer->type) {
 			case VLT_PANE:
 				view_add_pane_commands(view, clip_index, layer, depth);
@@ -363,32 +453,72 @@ static void view_add_box_layer_commands(View *view, unsigned clip_index)
 				view_add_image_commands(view, clip_index, layer, depth);
 				break;
 			case VLT_TEXT:
-				view_add_text_commands(view, clip_index, layer, depth);
+				view_add_text_layer_commands(view, clip_index, layer, depth);
 				break;
 		}
 	}
 }
 
+/* Helper to build a text command to draw things like debug labels. */
+static void add_simple_text_command(View *view, int x0, int y0, 
+	const char *text, unsigned length, unsigned num_characters, 
+	const unsigned *advances, int16_t font_id, uint32_t color, int key)
+{
+	System *system = view->document->system;
+
+	/* Measure the text if advances were not supplied. */
+	const unsigned *adv = advances;
+	if (adv == NULL) {
+		adv = new unsigned[length];
+		num_characters = measure_text(system, font_id, text, length, 
+			(unsigned *)adv);
+	}
+
+	/* Build the draw-text command. */
+	unsigned encoded_code_units = utf8_transcode(text, length, NULL, 
+		system->encoding);
+	TextCommandData *td = view_add_text_command(view, encoded_code_units, 
+		num_characters, 1, font_id, key);
+	if (td == NULL)
+		goto cleanup;
+	utf8_transcode(text, length, (void *)td->text.bytes, system->encoding);
+	*(uint32_t *)td->colors = color;
+	*(uint32_t *)td->color_code_unit_counts = length;
+	*(uint32_t *)td->color_character_counts = num_characters;
+	int dx = 0;
+	for (unsigned i = 0; i < num_characters; ++i) {
+		((int *)td->x_positions)[i] = x0 + 
+			round_fixed_to_int(dx, TEXT_METRIC_PRECISION);
+		dx += adv[i];
+	}
+	if ((system->flags & SYSFLAG_SINGLE_LINE_TEXT_LAYERS) == 0) {
+		for (unsigned i = 0; i < num_characters; ++i)
+			((int *)td->y_positions)[i] = y0;
+	} else {
+		td->line_y_position = y0;
+	}
+
+cleanup:
+	
+	if (advances == NULL)
+		delete [] adv;
+}
+
 /* Draws a debug label box. */
-static void view_draw_box_label(View *view, const char *label, unsigned length,
-	const float *bounds, Alignment align_h, Alignment align_v, 
+static void view_draw_box_label(View *view, const char *label, 
+	unsigned length, const float *bounds, Alignment align_h, Alignment align_v, 
 	float pad_h, float pad_v, uint32_t background_color, uint32_t text_color,
 	int depth)
 {
 	if (length == 0)
 		return;
 
+	/* Measure the label. */
 	System *system = view->document->system;
-
-	/* Measure the text. */
 	int16_t label_font_id = get_debug_label_font_id(system);
-	if (label_font_id == INVALID_FONT_ID)
-		return;
-	void *label_font = get_font_handle(system, label_font_id);
-	unsigned text_width, text_height;
-	unsigned *label_advances = new unsigned[length];
-	platform_measure_text(system->back_end, label_font, label, length,
-		&text_width, &text_height, label_advances);
+	unsigned text_width, text_height, *advances = NULL;
+	unsigned num_characters = measure_text_rectangle(system, label_font_id, 
+		label, length, &text_width, &text_height, &advances);
 
 	/* Calculate the label rectangle and place it within the bounding 
 	 * rectangle. */
@@ -402,7 +532,8 @@ static void view_draw_box_label(View *view, const char *label, unsigned length,
 
 	/* Add a command to draw the background. */
 	RectangleCommandData *d = (RectangleCommandData *)view_add_command(view, 
-		DCMD_RECTANGLE, sizeof(RectangleCommandData), NOT_CLIPPED, depth++);
+		DCMD_RECTANGLE, sizeof(RectangleCommandData), 
+		make_command_key(depth, 0), NO_BOX);
 	if (d != NULL) {
 		std::copy(bg_rect, bg_rect + 4, d->bounds);
 		d->border_color = 0;
@@ -410,48 +541,12 @@ static void view_draw_box_label(View *view, const char *label, unsigned length,
 		d->fill_color = background_color;
 	}
 
-	/* Allocate a text command with extra space to store the text, flags, 
-	 * positions and palette. */
-	unsigned required = sizeof(TextCommandData);
-	required += length * TEXT_LAYER_BYTES_PER_CHAR; /* Text, flags, positions. */
-	required += 1 * sizeof(uint32_t); /* Palette. */
-	TextCommandData *td = (TextCommandData *)view_add_command(view, DCMD_TEXT,
-		required, NOT_CLIPPED, depth++);
-	if (td == NULL)
-		goto cleanup;
-
-	char *block = (char *)(td + 1);
-	td->text = block;
-	block += length;
-	td->flags = (uint16_t *)block;
-	block += length * sizeof(uint16_t);
-	td->positions = (int *)block;
-	block += length * 2 * sizeof(int);
-	td->palette = (uint32_t *)block;
-	block += 1 * sizeof(uint32_t);
-
-	td->font_id = label_font_id;
-	td->key = label_font_id;
-	td->length = length;
-	td->num_colors = 1;
-
-	/* Copy in the data. */
-	memcpy((char *)td->text, label, length * sizeof(char));
-	((uint32_t *)td->palette)[0] = text_color;
-	unsigned x = round_signed(rleft(text_rect));
-	unsigned y = round_signed(rtop(text_rect));
-	for (unsigned i = 0; i < length; ++i) {
-		((int *)td->positions)[2 * i + 0] = x;
-		((int *)td->positions)[2 * i + 1] = y;
-		x += label_advances[i];
-		((uint16_t *)td->flags)[i] = 0;
-	}
-	((uint16_t *)td->flags)[0] = TLF_LINE_HEAD | TLF_SEGMENT_HEAD | 
-		TLF_STYLE_HEAD;
-
-cleanup:
-
-	delete [] label_advances;
+	/* Add a command to draw the label. */
+	int x = round_signed(rleft(text_rect));
+	int y = round_signed(rtop(text_rect));
+	add_simple_text_command(view, x, y, label, length, num_characters, 
+		advances, label_font_id, text_color, make_command_key(depth, 1));
+	delete [] advances;
 }
 
 static void view_add_debug_rectangle_commands(View *view, const Box *box, 
@@ -462,7 +557,7 @@ static void view_add_debug_rectangle_commands(View *view, const Box *box,
 
 	/* Outline the rectangle. */
 	d = (RectangleCommandData *)view_add_command(view, DCMD_RECTANGLE, 
-		sizeof(RectangleCommandData), NOT_CLIPPED, depth++);
+		sizeof(RectangleCommandData), make_command_key(depth, 0), NO_BOX);
 	if (d != NULL) {
 		memcpy(d->bounds, r, sizeof(d->bounds));
 		d->border_color = bg_color;
@@ -472,9 +567,8 @@ static void view_add_debug_rectangle_commands(View *view, const Box *box,
 
 	/* Add a label. */
 	if (draw_label) {
-		static const unsigned MAX_LABEL_LENGTH = 256;
-
 		/* Build the label text. */
+		static const unsigned MAX_LABEL_LENGTH = 256;
 		char label[MAX_LABEL_LENGTH];
 		int length = snprintf(label, sizeof(label), "%s: %.0fx%.0f", 
 			get_box_debug_string(box), rwidth(r), rheight(r));
@@ -483,8 +577,9 @@ static void view_add_debug_rectangle_commands(View *view, const Box *box,
 		label[length] = '\0';
 
 		/* Add commands to draw the label. */
-		view_draw_box_label(view, label, length, r, ALIGN_END, ALIGN_START, 
-			2.0f, 1.0f, bg_color, text_color, 100 + depth);
+		view_draw_box_label(view, label, length, r, 
+			ALIGN_END, ALIGN_START, 2.0f, 1.0f, bg_color, text_color, 
+			make_command_key(depth, 1));
 	}
 }
 
@@ -512,7 +607,7 @@ static void view_add_box_debug_commands(View *view, const Box *box)
 		draw_padding = false;
 
 	bool mouse_over = is_mouse_over(document, box);
-	bool draw_labels = mouse_over && (box->flags & BOXFLAG_NO_LABEL) == 0;
+	bool draw_labels = mouse_over && (box->t.flags & BOXFLAG_NO_LABEL) == 0;
 	uint32_t tint = mouse_over ? 0xFFFFFFFF : 0xFF808080;
 
 	/* Outer box. */
@@ -537,7 +632,7 @@ static void view_add_box_debug_commands(View *view, const Box *box)
 	/* Show moused-over elements. */
 	if ((view->flags & VFLAG_DEBUG_MOUSE_HIT) != 0 && is_mouse_over(document, box)) {
 		d = (RectangleCommandData *)view_add_command(view, 	DCMD_RECTANGLE, 
-			sizeof(RectangleCommandData), NOT_CLIPPED, depth);
+			sizeof(RectangleCommandData), make_command_key(depth), NO_BOX);
 		if (d == NULL)
 			return;
 		outer_rectangle(box, d->bounds);
@@ -579,15 +674,336 @@ static void view_build_box_commands(View *view)
 	do {
 		view->num_headers = 0;
 		view->command_data_size = 0;
-		unsigned num_boxes = view->boxes.size();
-		for (unsigned i = 0; i < num_boxes; ++i) {
+		for (unsigned i = 0; i < view->num_boxes; ++i) {
 			view_add_box_layer_commands(view, i);
 			view_add_box_debug_commands(view, view->boxes[i]);
 		}
 	} while (view_grow_buffers(view));
 }
 
-static void view_insert_clipping_commands(View *view)
+/* Helper to return the key from the text layer associated with a text fragment
+ * command. */
+inline const VisualLayer *get_text_layer(const DrawCommandHeader *header)
+{
+	return ((const VisualLayer *)header->data_offset);
+}
+
+/* A slice of a text layer. Fragments are the atomic units of text drawing, and
+ * contain characters that are styled identically. */
+struct TextFragment {
+	const Box *box;
+	const VisualLayer *layer;
+	const TextStyle *style;
+	uint32_t text_start;
+	uint32_t text_end;
+	uint32_t start     : 31; 
+	uint32_t end       : 31;
+	bool run_start     : 1;
+	bool selected      : 1;
+};
+
+/* True if A and B can be part of the same draw-text command. */
+inline bool fragments_draw_compatible(const TextFragment *a, 
+	const TextFragment *b, bool single_line)
+{
+	if (!measurement_compatible(a->style, b->style))
+		return false;
+	if (a->box->clip_ancestor != b->box->clip_ancestor)
+		return false;
+	if (single_line && a->box->axes[AXIS_V].pos != b->box->axes[AXIS_V].pos)
+		return false;
+	return true;
+}
+
+/* Operator used to order drawing groups into compatible clusters. */
+inline bool fragment_less(const TextFragment *a, 
+	const TextFragment *b, bool single_line) 
+{
+	if (!fragments_draw_compatible(a, b, single_line))
+		return a < b;
+	if (a->layer->text.container != b->layer->text.container)
+		return a->layer->text.container < b->layer->text.container;
+	return a->style->color < b->style->color;
+}
+
+static void safe_swap_fragments(TextFragment &a, TextFragment &b)
+{
+	assertb(!a.run_start);
+	assertb(!b.run_start);
+	std::swap(a, b);
+}
+
+/* A three way quicksort used to order text fragments into "clusters" of
+ * compatible fragments, and those clusters into colour runs. The first fragment
+ * in each colour run is marked. Efficient when there are only a few equivalence 
+ * classes, as is typically the case. */
+void quicksort_fragments(TextFragment *a, unsigned count, bool single)
+{
+	while (count > 1) {
+		TextFragment pivot = a[1];
+		unsigned i = unsigned(-1), j = count;
+		unsigned p = i, q = j;
+		for (;;) {
+			do { ++i; } while (fragment_less(a + i, &pivot, single));
+			do { --j; } while (j >= i && fragment_less(&pivot, a + j, single));
+			if (j <= i) break;
+			safe_swap_fragments(a[i], a[j]);
+			if (!fragment_less(a + i, &pivot, single)) 
+				safe_swap_fragments(a[i], a[++p]);
+			if (!fragment_less(&pivot, a + j, single))
+				safe_swap_fragments(a[j], a[--q]);
+		}
+		if (i == j) 
+			safe_swap_fragments(a[i], a[--q]);
+		j = i;
+		while (p + 1 != 0) 
+			safe_swap_fragments(a[p--], a[--i]);
+		while (q != count) 
+			safe_swap_fragments(a[q++], a[j++]);
+		a[i].run_start = true;
+	
+		unsigned count_greater = count - j;
+		if (count_greater > i) {
+			quicksort_fragments(a, i, single);
+			a += j;
+			count = count_greater;
+		} else {
+			quicksort_fragments(a + j, count_greater, single);
+			count = i;
+		}
+	}
+	if (count != 0)
+		a[0].run_start = true;
+}
+
+const unsigned COMBINER_STATIC_FRAGMENTS = 256;
+
+struct TextCombiner {
+	TextFragment fragment_buffer[COMBINER_STATIC_FRAGMENTS];
+	TextFragment *fragments;
+	unsigned capacity;
+	unsigned count;
+};
+
+static void combiner_reset(TextCombiner *combiner)
+{
+	combiner->count = 0;
+}
+
+static void combiner_init(TextCombiner *combiner)
+{
+	combiner->fragments = combiner->fragment_buffer;
+	combiner->capacity = COMBINER_STATIC_FRAGMENTS;
+	combiner_reset(combiner);
+}
+
+static void combiner_deinit(TextCombiner *combiner)
+{
+	if (combiner->fragments != combiner->fragment_buffer)
+		delete [] combiner->fragments;
+}
+
+static void combiner_add_fragment(TextCombiner *c, 
+	const Box *box, const VisualLayer *layer, 
+	unsigned element_start, unsigned element_end, 
+	unsigned text_start, unsigned text_end, 
+	const TextStyle *style, bool selected)
+{
+	assertb(element_start <= layer->text.num_characters);
+	assertb(element_end <= layer->text.num_characters);
+	assertb(text_start <= text_end);
+
+	if (c->count == c->capacity) {
+		c->capacity *= 2;
+		TextFragment *nf = new TextFragment[c->capacity];
+		memcpy(nf, c->fragments, c->count * sizeof(TextFragment));
+		if (c->fragments != c->fragment_buffer)
+			delete [] c->fragments;
+		c->fragments = nf;
+	}
+
+	TextFragment *fragment = c->fragments + c->count;
+	fragment->box = box;
+	fragment->layer = layer;
+	fragment->style = style;
+	fragment->text_start = text_start;
+	fragment->text_end = text_end;
+	fragment->start = element_start;
+	fragment->end = element_end;
+	fragment->run_start = false;
+	fragment->selected = selected;
+	c->count++;
+}
+
+static void combiner_build_fragments(View *view, TextCombiner *combiner, 
+	unsigned start, unsigned end)
+{
+	combiner_reset(combiner);
+	ParagraphIterator ei;
+	const DrawCommandHeader *headers = view->headers;
+	for (unsigned i = start; i != end; ++i) {
+		const DrawCommandHeader *header = headers + i;
+		const VisualLayer *layer = get_text_layer(header);
+		const Box *box = view->boxes[header->box_index];
+		assertb((box->t.flags & BOXFLAG_IS_TEXT_BOX) != 0);
+		iterate_fragments(&ei, view->document, layer->text.container, box);
+		while (ei.count != 0) {
+			combiner_add_fragment(
+				combiner, box, layer, 
+				ei.offset - layer->text.start, 
+				ei.offset + ei.count - layer->text.start, 
+				ei.text_start, 
+				ei.text_end, 
+				ei.style, 
+				fragment_in_selection(&ei));
+			next_fragment(&ei);
+		}
+	}
+}
+
+/* Length totals for an interval of draw-compatible fragments.  */
+struct ClusterSizes {
+	unsigned num_characters;
+	unsigned num_code_units;
+	unsigned num_palette_entries;
+};
+
+/* Orders fragments within the combiner, bringing together fragments that can
+ * be part of the same draw command into "clusters". The fragments within a
+ * cluster are further grouped by colour for palette generation. */
+static void combiner_identify_clusters(View *view, TextCombiner *combiner)
+{
+	const System *system = view->document->system;
+	quicksort_fragments(combiner->fragments, combiner->count, 
+		(system->flags & SYSFLAG_SINGLE_LINE_TEXT_LAYERS) != 0);
+}
+
+/* Assembles a run of compatible text fragments into a final draw-text command. */
+static void process_text_cluster(
+	View *view, ClipMemory *clip_memory, 
+	TextCombiner *combiner,
+	unsigned start, unsigned end, 
+	const ClusterSizes *sizes)
+{
+	/* Add a clip command for the cluster. Fragments within a cluster have the 
+	 * same clip box. */
+	const System *system = view->document->system;
+	const TextFragment *first_fragment = combiner->fragments + start;
+	view_set_clip(view, clip_memory, first_fragment->box->clip);
+
+	/* Add the text command. */
+	int16_t font_id = first_fragment->style->font_id;
+	TextCommandData *d = view_add_text_command(view, sizes->num_code_units,
+		sizes->num_characters, sizes->num_palette_entries, font_id, 0);
+	if (d == NULL)
+		return;
+
+	unsigned byte_shift = ENCODING_BYTE_SHIFTS[system->encoding];
+	char *text_pos = (char *)d->text.bytes;
+	int *x_pos = (int *)d->x_positions;
+	int *y_pos = NULL;
+	uint32_t *colors = (uint32_t *)d->colors;
+	uint32_t *code_unit_counts = (uint32_t *)d->color_code_unit_counts;
+	uint32_t *character_counts = (uint32_t *)d->color_character_counts;
+
+	/* Multi-line commands store a Y position for each character. Single line
+	 * commands store the common Y position of all characters in the 
+	 * cluster. */
+	bool multi_line = (system->flags & SYSFLAG_SINGLE_LINE_TEXT_LAYERS) == 0;
+	if (multi_line) {
+		y_pos = (int *)d->y_positions;
+	} else {
+		float top = content_edge_lower(first_fragment->box, AXIS_V);
+		d->line_y_position = round_signed(top);
+	}
+
+	int run_index = -1;
+	for (unsigned i = start; i != end; ++i) {
+		const TextFragment *fragment = combiner->fragments + i;
+		const VisualLayer *layer = fragment->layer;
+		const Box *box = fragment->box;
+
+		/* Append the fragment's text. */
+		const char *text = (const char *)get_text_layer_text(layer);
+		unsigned text_start = fragment->text_start << byte_shift;
+		unsigned text_end = fragment->text_end << byte_shift;
+		unsigned text_bytes = text_end - text_start;
+		memcpy(text_pos, text + text_start, text_bytes);
+		text_pos += text_bytes;
+
+		/* Copy in the fragment's positions, adding in the top-left position
+		 * of the box. */
+		int offset_x = round_signed(box->axes[AXIS_H].pos);
+		int offset_y = round_signed(box->axes[AXIS_V].pos);
+		const int *layer_x_positions = get_text_layer_positions(layer);
+		for (unsigned j = fragment->start; j < fragment->end; ++j) {
+			assertb(j < layer->text.num_characters);
+			*x_pos++ = offset_x + layer_x_positions[j];
+		}
+		if (multi_line) {
+			for (unsigned j = fragment->start; j < fragment->end; ++j)
+				*y_pos++ = offset_y;
+		}
+
+		/* Add a palette entry if this is the first fragment of a colour run. */
+		if (fragment->run_start) {
+			run_index++;
+			colors[run_index] = fragment->selected ? 
+				view->document->selected_text_color :
+				blend32(fragment->style->color, fragment->style->tint);
+			code_unit_counts[run_index] = 0;
+			character_counts[run_index] = 0;
+		}
+		code_unit_counts[run_index] += fragment->text_end - fragment->text_start;
+		character_counts[run_index] += fragment->end - fragment->start;
+	}
+}
+
+/* Converts each cluster of compatible fragments into a draw-text command. */
+static void combiner_visit_clusters(View *view, ClipMemory *clip_memory, 
+	TextCombiner *combiner)
+{
+	bool single_line = (view->document->system->flags & 
+		SYSFLAG_SINGLE_LINE_TEXT_LAYERS) != 0;
+	ClusterSizes sizes = { 0, 0, 0 };
+	unsigned start = 0;
+	const TextFragment *last = NULL;
+	for (unsigned i = 0; i < combiner->count; ++i) {
+		const TextFragment *fragment = combiner->fragments + i;
+		const TextLayer *layer = &fragment->layer->text;
+		if (fragment->run_start && last != NULL && 
+			!fragments_draw_compatible(fragment, last, single_line)) {
+			process_text_cluster(view, clip_memory, combiner, start, i, &sizes);
+			sizes.num_code_units = 0;
+			sizes.num_characters = 0;
+			sizes.num_palette_entries = 0;
+			start = i;
+		}
+		sizes.num_code_units += layer->num_code_units;
+		sizes.num_characters += layer->num_characters;
+		sizes.num_palette_entries += fragment->run_start;
+		last = fragment;
+	}
+	if (start != combiner->count)
+		process_text_cluster(view, clip_memory, combiner, start, 
+			combiner->count, &sizes);
+}
+
+/* Processes a run of text fragment commands, generating one or more draw-text
+ * commands. */
+static void combine_text_layers(View *view, ClipMemory *clip_memory, 
+	TextCombiner *combiner, unsigned start, unsigned end)
+{
+	combiner_reset(combiner);
+	combiner_build_fragments(view, combiner, start, end);
+	combiner_identify_clusters(view, combiner);
+	combiner_visit_clusters(view, clip_memory, combiner);
+}
+
+/* A second command building pass that rewrites the sorted command list, 
+ * inserting clipping commands and converting runs of text fragments in each
+ * depth interval to final draw-text commands. */
+static void view_insert_dependent_commands(View *view)
 {
 	ClipMemory clip_memory;
 	clip_memory.head = 0;
@@ -596,16 +1012,33 @@ static void view_insert_clipping_commands(View *view)
 	unsigned count = view->num_headers;
 	view->header_start ^= view->header_capacity;
 	view->num_headers = 0;
-	for (unsigned i = 0; i < count; ++i) {
-		const DrawCommandHeader *header = view->headers + start + i;
-		if (header->clip_index != NOT_CLIPPED) {
-			const Box *box = view->boxes[header->clip_index];
-			view_set_clip(view, &clip_memory, box->clip);
+
+	TextCombiner combiner;
+	combiner_init(&combiner);
+	unsigned text_layer_count = 0;
+	for (unsigned i = start, end = start + count; i != end; ++i) {
+		const DrawCommandHeader *header = view->headers + i;
+		if (header->command == DCMD_TEXT_LAYER) {
+			text_layer_count += 1;
+		} else if (text_layer_count != 0) {
+			combine_text_layers(view, &clip_memory, &combiner, 
+				i - text_layer_count, i);
+			text_layer_count = 0;
 		} else {
-			view_set_clip(view, &clip_memory, view->bounds);
+			if (header->box_index != NO_BOX) {
+				const Box *box = view->boxes[header->box_index];
+				view_set_clip(view, &clip_memory, box->clip);
+			} else {
+				view_set_clip(view, &clip_memory, view->bounds);
+			}
+			view_add_command_header(view, header);
 		}
-		view_add_command_header(view, header);
 	}
+	if (text_layer_count != 0) {
+		combine_text_layers(view, &clip_memory, &combiner, 
+			start + count - text_layer_count, start + count);
+	}
+	combiner_deinit(&combiner);
 }
 
 /* Rebuilds the view's command list. */
@@ -615,19 +1048,19 @@ static void view_build_commands(View *view)
 	do {
 		view_build_box_commands(view);
 		view_sort_commands(view);
-		view_insert_clipping_commands(view);
+		view_insert_dependent_commands(view);
 	} while (view_grow_buffers(view));
 }
 
 void update_view(View *view)
 {
 	Document *document = view->document;
-	if (view->layout_clock == document->layout_clock && 
+	if (view->layout_clock == document->update_clock && 
 		(view->flags & VFLAG_REBUILD_COMMANDS) == 0)
 		return;
-	view_build_box_list(view);
+	view_update_box_list(view);
 	view_build_commands(view);
-	view->layout_clock = document->layout_clock;
+	view->layout_clock = document->update_clock;
 	view->paint_clock++;
 }
 
@@ -645,6 +1078,5 @@ void view_handle_keyboard_event(View *view, MessageType type,
 {
 	document_handle_keyboard_event(view->document, view, type, key_code, flags);
 }
-
 
 } // namespace stkr

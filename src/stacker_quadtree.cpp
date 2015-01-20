@@ -80,7 +80,6 @@ static unsigned box_cell_code(const Box *box)
 	return grid_cell_code(cx, cy, level); 
 }
 
-
 void grid_init(Grid *grid)
 {
 	grid->cells = NULL;
@@ -268,9 +267,9 @@ Box *grid_query_anchor(Document *document, float qx,
 	/* Clip the (qy0, qy1) interval against the document to form the query 
 	 * band. */
 	float doc_x0, doc_x1, doc_y0, doc_y1;
-	if (document->root->box == NULL)
+	if (document->root->t.counterpart.box == NULL)
 		return NULL;
-	outer_rectangle(document->root->box, &doc_x0, &doc_x1, &doc_y0, &doc_y1);
+	outer_rectangle(document->root->t.counterpart.box, &doc_x0, &doc_x1, &doc_y0, &doc_y1);
 	qy0 = clip(qy0, doc_y0, doc_y1);
 	qy1 = clip(qy1, doc_y0, doc_y1);
 	if (qy1 < qy0)
@@ -295,7 +294,7 @@ Box *grid_query_anchor(Document *document, float qx,
 			num_boxes = MAX_BOXES;
 		for (unsigned i = 0; i < num_boxes; ++i) {
 			Box *box = boxes[i];
-			if ((box->flags & BOXFLAG_SELECTION_ANCHOR) != 0 && 
+			if ((box->t.flags & BOXFLAG_SELECTION_ANCHOR) != 0 && 
 				(anchor == NULL || better_anchor(qx, qy0, box, anchor)))
 				anchor = box;
 		}
@@ -319,7 +318,7 @@ static unsigned query_rect_linear(Document *document, Box **result,
 	unsigned max_count, float qx0, float qx1, float qy0, float qy1)
 {
 	unsigned count = 0;
-	Box *box = document->root->box;
+	Box *box = document->root->t.counterpart.box;
 	while (box != NULL) {
 		float bx0, bx1, by0, by1;
 		hit_rectangle(box, &bx0, &bx1, &by0, &by1);
@@ -328,16 +327,16 @@ static unsigned query_rect_linear(Document *document, Box **result,
 				result[count] = box;
 			count++;
 		}
-		if (box->first_child != NULL) {
-			box = box->first_child;
+		if (box->t.first.box != NULL) {
+			box = box->t.first.box;
 		} else {
-			while (box->next_sibling == NULL) {
-				box = box->parent;
+			while (box->t.next.box == NULL) {
+				box = box->t.parent.box;
 				if (box == NULL)
 					break;
 			}
 			if (box != NULL)
-				box = box->next_sibling;
+				box = box->t.next.box;
 		}
 	}
 	return count;

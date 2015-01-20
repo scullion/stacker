@@ -78,20 +78,18 @@ const unsigned TLF_COLOR_INDEX_MASK = (1 << 12) - 1;
 
 const unsigned MAX_TEXT_LAYER_COLORS = 64;
 
-/* A text layer is a list of glyph indices and corresponding (x, y) positions. */
+/* A text layer is an encoded string and an array of horizontal offsets. */
 struct TextLayer {
-	uint32_t key;
+	unsigned num_characters;
+	unsigned num_code_units;
+	const Node *container;
+	uint32_t start;
+	uint32_t end; 
 	int16_t font_id;
-	uint16_t flags;
-	unsigned length;
-	unsigned num_colors; /*
-	char text[length];
-	uint16_t flags[length];
-	uint32_t palette[num_colors];
-	struct { int x, y; } positions[length]; */
+	int adjustment_ratio; /*
+	int positions[num_characters];
+	(utf8_t|utf16_t|utf32_t) text[num_code_units + 1]; */
 };
-
-const unsigned TEXT_LAYER_BYTES_PER_CHAR = (sizeof(char) + sizeof(uint16_t) + 2 * sizeof(int));
 
 /* Each box has a stack of layers which define its visual representation. */
 struct VisualLayer {
@@ -107,12 +105,6 @@ struct VisualLayer {
 	};
 };
 
-const char *get_text_layer_text(const VisualLayer *layer);
-const uint16_t *get_text_layer_flags(const VisualLayer *layer);
-const uint32_t *get_text_layer_palette(const VisualLayer *layer);
-const int *get_text_layer_positions(const VisualLayer *layer);
-VisualLayer *create_layer(Document *document, const Node *node, 
-	VisualLayerType type, unsigned extra = 0);
 void destroy_layer(Document *document, VisualLayer *layer);
 void release_layer(Document *document, VisualLayer *layer);
 void release_layer_chain(Document *document, VisualLayerChain chain, VisualLayer *head);
@@ -124,6 +116,12 @@ VisualLayer *layer_chain_replace(VisualLayerChain chain, VisualLayer **head,
 bool layer_chain_remove(VisualLayerChain chain, VisualLayer **head, VisualLayer *layer);
 VisualLayer *layer_chain_mirror(VisualLayer *head, VisualLayerChain a, VisualLayerChain b);
 unsigned layer_chain_count_keys(VisualLayerChain chain, const VisualLayer *head);
+
+const void *get_text_layer_text(const VisualLayer *layer);
+const int *get_text_layer_positions(const VisualLayer *layer);
+VisualLayer *create_layer(Document *document, const Node *node, 
+	VisualLayerType type, unsigned extra = 0);
+unsigned intercharacter_position(const VisualLayer *layer, float dx);
 
 void poll_network_image(Document *document, Node *node, 
 	VisualLayer *layer);

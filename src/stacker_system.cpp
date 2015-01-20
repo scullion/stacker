@@ -41,19 +41,16 @@ static uint32_t make_font_key(const LogicalFont *logfont)
 	return murmur3_32(logfont->face, strlen(logfont->face), seed);
 }
 
-/* Calculates round(n * (a / b)). */
-inline unsigned iscale(unsigned n, unsigned a, unsigned b)
-{
-	return (n * a + b / 2) / b;
-}
-
 /* Precalculates numbers needed for typesetting from the system font metrics. */
 static void calculate_derived_font_metrics(FontMetrics *metrics)
 {
 	/* w = (1/3)em, y = (1/6)em, z = (1/9)em */
-	metrics->space_width            = iscale(metrics->em_width, 1000, 3000);
-	metrics->space_stretch          = iscale(metrics->em_width, 1000, 6000);
-	metrics->space_shrink           = iscale(metrics->em_width, 1000, 9000);
+	static const int ONE_THIRD = (1 << TEXT_METRIC_PRECISION) / 3;
+	static const int ONE_SIXTH = (1 << TEXT_METRIC_PRECISION) / 6;
+	static const int ONE_NINTH = (1 << TEXT_METRIC_PRECISION) / 9;
+	metrics->space_width   = fixed_multiply(metrics->em_width, ONE_THIRD, TEXT_METRIC_PRECISION);
+	metrics->space_stretch = fixed_multiply(metrics->em_width, ONE_SIXTH, TEXT_METRIC_PRECISION);
+	metrics->space_shrink  = fixed_multiply(metrics->em_width, ONE_NINTH, TEXT_METRIC_PRECISION);
 	metrics->paragraph_indent_width = metrics->em_width;
 }
 
@@ -101,13 +98,40 @@ const FontMetrics *get_font_metrics(System *system, int16_t font_id)
 	return &system->font_cache[font_id].metrics;
 }
 
-void measure_text(System *system, int16_t font_id, 
-	const char *text, unsigned text_length, unsigned *width, unsigned *height,
-	unsigned *character_widths)
+unsigned measure_text(System *system, int16_t font_id, const void *text, 
+	unsigned length, unsigned *advances)
 {
 	void *font_handle = get_font_handle(system, font_id);
-	platform_measure_text(system->back_end, font_handle, text, text_length, 
-		width, height, character_widths);
+	return platform_measure_text(system->back_end, font_handle, 
+		text, length, advances);
+}
+
+/* A convenience function to determine the size of a string's bounding 
+ * rectangle. Optionally returns the temporary heap-allocated advances array
+ * used, for which the caller takes responsibility. */
+unsigned measure_text_rectangle(System *system, int16_t font_id, 
+	const void *text, unsigned length, unsigned *out_width, 
+	unsigned *out_height, unsigned **out_advances)
+{
+	unsigned *advances = new unsigned[length];
+	unsigned num_characters = measure_text(system, font_id, text, 
+		length, advances);
+	if (out_width != NULL) {
+		*out_width = 0;
+		for (unsigned i = 0; i < num_characters; ++i)
+			*out_width += advances[i];
+		*out_width = round_fixed_to_int(*out_width, TEXT_METRIC_PRECISION);
+	}
+	if (out_height != NULL) {
+		const FontMetrics *metrics = get_font_metrics(system, font_id);
+		*out_height = round_fixed_to_int(metrics->height, TEXT_METRIC_PRECISION);
+	}
+	if (out_advances != NULL) {
+		*out_advances = advances;	
+	} else {
+		delete [] out_advances;
+	}
+	return num_characters;
 }
 
 /* Precomputes hashed rule names for tag tokens and pseudo classes. */
@@ -223,10 +247,13 @@ int16_t get_debug_label_font_id(System *system)
 	return system->debug_label_font_id;
 }
 
-System *create_system(unsigned flags, BackEnd *back_end, UrlCache *url_cache)
+System *create_system(unsigned flags, BackEnd *back_end, UrlCache *url_cache, 
+	TextEncoding encoding, TextEncoding  message_encoding)
 {
 	System *system = new System();
 	system->flags = flags;
+	system->encoding = encoding;
+	system->message_encoding = message_encoding;
 	system->back_end = back_end;
 	system->url_cache = url_cache;
 	system->rule_table_revision = 0;

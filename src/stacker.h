@@ -2,6 +2,7 @@
 
 #include <cstdarg>
 #include <climits>
+#include <cstdint>
 
 #include "stacker_token.h"
 #include "stacker_attribute.h"
@@ -29,6 +30,15 @@ enum AxisBit {
 	AXIS_BIT_V = 1 << AXIS_V
 };
 
+enum TextEncoding {
+	ENCODING_ASCII, /* Encode strings as byte arrays, truncating to 7 bits. */
+	ENCODING_LATIN1, /* Encode strings as byte arrays, truncating to 8 bits. */
+	ENCODING_UTF8,
+	ENCODING_UTF16,
+	ENCODING_UTF32,
+	NUM_ENCODINGS
+};
+
 enum NodeType {
 	LNODE_INVALID = -1,
 
@@ -47,18 +57,17 @@ enum NodeType {
 
 enum NodeFlag {
 	/* Bits that say things need to be recalculated. */
-	NFLAG_PARENT_CHANGED            = 1 << 0,  // The node has been moved in the graph.
-	NFLAG_UPDATE_BACKGROUND_LAYERS  = 1 << 1,  // The node's visual layer stack must be updated to reflect its current attributes.
-	NFLAG_UPDATE_TEXT_LAYERS        = 1 << 2,  // The node's text layer stack must be updated. This is done post-layout.
-	NFLAG_UPDATE_BOX_LAYERS         = 1 << 3,  // The box's layer stack must by synchronized with the node's.
-	NFLAG_FOLD_ATTRIBUTES           = 1 << 4,  // Folded attribute values must be recalculated.
-	NFLAG_REBUILD_BOXES             = 1 << 5,  // This node's box must be recreated.
-	NFLAG_REBUILD_INLINE_CONTEXT    = 1 << 6,  // The node's inline context buffer must be rebuilt from its children.
-	NFLAG_REMEASURE_INLINE_TOKENS   = 1 << 7,  // Tokens of an inline container may have changed size.
-	NFLAG_RECOMPOSE_CHILD_BOXES     = 1 << 8,  // Node child boxes have changed, and should be rearranged within the parent.
-	NFLAG_UPDATE_RULE_KEYS          = 1 << 9,  // The set of keys used to match rules for this node must be recalculated.
-	NFLAG_UPDATE_MATCHED_RULES      = 1 << 10, // The node's match rule list must be recalculated.
-	NFLAG_UPDATE_CHILD_RULES        = 1 << 11, // Selectors that match parents may now match differently for children of this node.
+	NFLAG_PARENT_CHANGED               = 1 << 0,  // The node has been moved in the graph.
+	NFLAG_UPDATE_BACKGROUND_LAYERS     = 1 << 1,  // The node's visual layer stack must be updated to reflect its current attributes.
+	NFLAG_UPDATE_BOX_LAYERS            = 1 << 2,  // The box's layer stack must by synchronized with the node's.
+	NFLAG_FOLD_ATTRIBUTES              = 1 << 3,  // Folded attribute values must be recalculated.
+	NFLAG_REBUILD_BOXES                = 1 << 4,  // This node's box must be recreated.
+	NFLAG_RECONSTRUCT_PARAGRAPH        = 1 << 5,  // Rebuild paragraph elements from children if this is an inline container.
+	NFLAG_REMEASURE_PARAGRAPH_ELEMENTS = 1 << 6,  // Update text advances if this is an inline container. 
+	NFLAG_RECOMPOSE_CHILD_BOXES        = 1 << 8,  // Node child boxes have changed, and should be rearranged within the parent.
+	NFLAG_UPDATE_RULE_KEYS             = 1 << 9,  // The set of keys used to match rules for this node must be recalculated.
+	NFLAG_UPDATE_MATCHED_RULES         = 1 << 10, // The node's match rule list must be recalculated.
+	NFLAG_UPDATE_CHILD_RULES           = 1 << 11, // Selectors that match parents may now match differently for children of this node.
 
 	/* Memory management flags. */		   
 	NFLAG_HAS_STATIC_TEXT           = 1 << 12, // The node's text buffer is allocated as part of the node block. 
@@ -88,17 +97,19 @@ enum NodeFlag {
 	NFLAG_EXPANDED_LEFT             = 1 << 25, // The left edge of the node has moved.
 	NFLAG_EXPANDED_RIGHT            = 1 << 26, // The right edge of the node has moved.
 	NFLAG_EXPANDED_UP               = 1 << 27, // The top edge of the node has moved.
-	NFLAG_EXPANDED_DOWN             = 1 << 28  // The bottom edge of the node has moved.
+	NFLAG_EXPANDED_DOWN             = 1 << 28, // The bottom edge of the node has moved.
+
+	/* Set for nodes that contribute one or more paragraph elements to an inline
+	 * layout. Used to skip over zero-element nodes when co-iterating nodes and
+	 * elements. */
+	NFLAG_HAS_PARAGRAPH_ELEMENTS    = 1 << 29
 };
 
 const unsigned NFLAG_EXPANSION_MASK = NFLAG_EXPANDED_LEFT | 
 	NFLAG_EXPANDED_RIGHT | NFLAG_EXPANDED_UP | NFLAG_EXPANDED_DOWN;
 
-/* A position between two characters in an inline context. */
-struct InternalAddress {
-	unsigned token;
-	unsigned offset;
-};
+/* Flags that should be passed to the parent when updating nodes. */
+const unsigned NFLAG_PROPAGATE_UP_MASK = 0;
 
 /* A special value for InlineAddress::offset signifying the position after
  * the last character. This exists to allow us to distinguish "before" and
@@ -109,7 +120,7 @@ static const unsigned IA_END = UINT_MAX;
 /* A tree position between any two characters. */
 struct CaretAddress {
 	const Node *node;
-	InternalAddress ia;
+	unsigned offset;
 };
 
 enum DocumentFlag {
@@ -126,7 +137,10 @@ enum DocumentFlag {
 	DOCFLAG_DEBUG_LAYOUT            = 1 <<  9, // Send layout diagnostics to the dump function.
 	DOCFLAG_DEBUG_FULL_LAYOUT       = 1 << 10, // Send layout diagnostics to the dump function.
 	DOCFLAG_DEBUG_PARAGRAPHS        = 1 << 11, // Dump paragraph breakpoint info.
-	DOCFLAG_DEBUG_SELECTION         = 1 << 12  // Print selection hit testing messages.
+	DOCFLAG_DEBUG_SELECTION         = 1 << 12, // Print selection hit testing messages.
+
+	/* Internal, do not use. */
+	DOCFLAG_UPDATE_REMATCH_RULES    = 1 << 14  // Assume rule tables have changed during the current update.
 };
 
 /* The status of a document's attempt to navigate to a URL. */
@@ -152,6 +166,7 @@ enum ViewFlag {
 	VFLAG_REBUILD_COMMANDS           = 1 << 12  // Must rebuild draw commands.
 };
 
+/* Enables all view debug features. */
 const unsigned VFLAG_DEBUG_MASK = 
 	VFLAG_DEBUG_OUTER_BOXES | 
 	VFLAG_DEBUG_PADDING_BOXES | 
@@ -161,7 +176,7 @@ const unsigned VFLAG_DEBUG_MASK =
 	VFLAG_DEBUG_MOUSE_HIT;
 
 enum SystemFlag {
-	SYSFLAG_TEXT_LAYER_PALETTES       = 1 << 0, // Group text clusters for the same font into a single layer containing a style palette.
+	SYSFLAG_SINGLE_LINE_TEXT_LAYERS   = 1 << 0, // The back end requires that all characters in a text share have the same Y position.
 	SYSFLAG_CACHE_HIDDEN_NODE_LAYOUTS = 1 << 1  // Spend memory to make showing and hiding nodes fast.
 };
 
@@ -241,7 +256,6 @@ void insert_child_before(Document *document, Node *parent, Node *child,
 void append_child(Document *document, Node *parent, Node *child);
 void prepend_child(Document *document, Node *parent, Node *child);
 void remove_from_parent(Document *document, Node *child);
-bool is_child(const Node *child, const Node *parent);
 NodeType get_type(const Node *node);
 unsigned get_text_length(const Node *node);
 Box *get_box(Node *node);
@@ -289,7 +303,8 @@ int read_as_string(const Node *node, int name, char *buffer,
 	unsigned bufer_size, unsigned *out_length = 0, const char *defval = 0,
 	StringSetRepresentation ssr = SSR_INTERNAL);
 int read_as_url(const Node *node, int name_token, 
-	urlcache::ParsedUrl **out_url, char *buffer = 0, unsigned buffer_size = 0);
+	urlcache::ParsedUrl **out_url, char *buffer = 0, 
+	unsigned buffer_size = 0);
 
 int set_integer_attribute(Document *document, Node *node, int name, 
 	ValueSemantic vs, int value, AttributeOperator op = AOP_SET);
@@ -365,7 +380,8 @@ void set_box_debug_string(Box *box, const char *fmt, ...);
  * System
  */
 System *create_system(unsigned flags = 0, BackEnd *back_end = 0, 
-	urlcache::UrlCache *url_cache = 0);
+	urlcache::UrlCache *url_cache = 0, TextEncoding encoding = ENCODING_UTF8,
+	TextEncoding message_encoding = ENCODING_UTF8);
 void destroy_system(System *system);
 BackEnd *get_back_end(System *system);
 unsigned get_total_nodes(const System *system);
@@ -382,7 +398,7 @@ float get_root_dimension(const Document *document, Axis axis);
 void set_root_dimension(Document *document, Axis axis, unsigned dimension);
 void set_layout_dump_callback(Document *document, DumpCallback layout_dump, 
 	void *layout_dump_data = 0);
-void update_document(Document *document);
+bool update_document(Document *document, uintptr_t timeout = 0);
 Node *get_root(Document *document);
 const Node *get_root(const Document  *document);
 unsigned get_hit_clock(const Document *document);
@@ -422,14 +438,14 @@ void view_handle_keyboard_event(View *view, MessageType type,
  * Parser
  */
 int parse(System *system, Document *document, Node *root, const char *input, 
-	unsigned length, char *error_buffer = 0, unsigned max_error_size = 0);
+	unsigned length, void *error_buffer = 0, unsigned error_buffer_size = 0);
 int create_node_from_markup(
 	Node **out_node, 
 	Document *document, 
 	const char *input, 
 	unsigned length, 
 	char *error_buffer = 0, 
-	unsigned max_error_size = 0);
+	unsigned error_buffer_size = 0);
 
 /*
  * Utilities

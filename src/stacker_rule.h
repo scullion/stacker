@@ -49,8 +49,8 @@ int add_rule_from_attributes(
 	int priority = 0);
 void clear_rule_table(RuleTable *table);
 unsigned make_node_rule_keys(const System *system, 
-	int node_token, unsigned node_flags, const char *cls, unsigned cls_length, 
-	uint64_t *keys, unsigned max_keys);
+	int node_token, unsigned node_flags, const char *cls, 
+	unsigned cls_length, uint64_t *keys, unsigned max_keys);
 unsigned match_rules(Document *document, Node *node, 
 	const Rule **matched, unsigned max_rules,
 	const RuleTable *local_table = NULL, 

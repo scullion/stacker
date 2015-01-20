@@ -795,12 +795,10 @@ static void gui_update_indicators(GuiState *state)
 
 	CaretAddress start = get_selection_start(doc);
 	CaretAddress end = get_selection_end(doc);
-	gui_info_set(state, IDC_SELECTION_START_NODE, "Caret A: %s/%d/%d", 
-		get_node_debug_string(start.node, "N/A"), 
-		start.ia.token, start.ia.offset);
-	gui_info_set(state, IDC_SELECTION_END_NODE, "Caret B: %s/%d/%d", 
-		get_node_debug_string(end.node, "N/A"), 
-		end.ia.token, end.ia.offset);
+	gui_info_set(state, IDC_SELECTION_START_NODE, "Caret A: %s/%d", 
+		get_node_debug_string(start.node, "N/A"), start.offset);
+	gui_info_set(state, IDC_SELECTION_END_NODE, "Caret B: %s/%d", 
+		get_node_debug_string(end.node, "N/A"), end.offset);
 
 	gui_info_set(state, IDC_SELECTION_INFO_1, "Flags: %s",
 		((get_flags(doc) & DOCFLAG_SELECTING) != 0 ? "DOCFLAG_SELECTING" : ""));
@@ -849,7 +847,7 @@ static void gui_configure_scroll_bar(GuiState *state, HWND scroll_bar_handle,
 
 static const int GUI_VIEWER_PADDING = 8;
 static const int GUI_VIEWER_DUMP_HEIGHT = 160;
-static const int GUI_VIEWER_CONTROL_GROUP_HEIGHT = 100;
+static const int GUI_VIEWER_CONTROL_GROUP_HEIGHT = 140;
 static const int GUI_VIEWER_NAV_BAR_HEIGHT = 24;
 static const int GUI_VIEWER_SCROLL_BAR_WIDTH = 18;
 static const int GUI_VIEWER_SCROLL_BAR_GAP = 8;
@@ -1547,6 +1545,12 @@ static BOOL CALLBACK gui_dialog_proc(HWND hwnd, unsigned message, WPARAM wp, LPA
 			} else if (id == IDM_STRUCTURE_CHANGE_NOTIFICATION_TEST) {
 				gui_begin_test(state, GUT_STRUCTURE_CHANGE);
 				return TRUE;
+			} else if (id == IDM_DEBUG_SET_ROOT_SIZE_1) {
+				set_root_dimension(state->document, AXIS_H, 1013);
+				return TRUE;
+			} else if (id == IDM_DEBUG_SET_ROOT_SIZE_2) {
+				set_root_dimension(state->document, AXIS_H, 1038);
+				return TRUE;
 			} else if (id == IDM_NEW_FILE) {
 				gui_new_file(state);
 				return TRUE;
@@ -1833,9 +1837,11 @@ static void gui_init(GuiState *state)
 	state->url_cache->set_local_fetch_callback(&local_fetch_callback);
 
 	state->back_end = d2d_init(state->url_cache);
-	state->system = create_system(SYSFLAG_TEXT_LAYER_PALETTES | 
+	state->system = create_system(
+		SYSFLAG_SINGLE_LINE_TEXT_LAYERS | 
 		SYSFLAG_CACHE_HIDDEN_NODE_LAYOUTS, 
-		state->back_end, state->url_cache);
+		state->back_end, state->url_cache,
+		ENCODING_UTF16, ENCODING_LATIN1);
 	state->document = create_document(state->system, 
 		DOCFLAG_ENABLE_SELECTION | 
 		DOCFLAG_DEBUG_SELECTION |

@@ -193,7 +193,7 @@ static void d2d_trc_clear(BackEnd *back_end)
 	back_end->run_cache_clock = 0;
 }
 
-static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const char *text, 
+static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const uint16_t *text, 
 	unsigned length, BackEndFont *bef)
 {
 	if (length == 0)
@@ -201,7 +201,7 @@ static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const char *text,
 
 	/* Look for an entry for this string, keeping track of the LRU entry 
 	 * encountered in the probe chain. */
-	uint64_t key = murmur3_64(text, length, (unsigned)bef);
+	uint64_t key = murmur3_64(text, length * sizeof(uint16_t), (unsigned)bef);
 	unsigned index = key % RENDER_CACHE_CAPACITY;
 	TextRunCacheEntry *entry = NULL, *lru_entry = NULL;
 	unsigned now = back_end->run_cache_clock++;
@@ -238,12 +238,6 @@ static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const char *text,
 	/* If this entry has been used before, delete the existing data. */
 	d2d_trc_clear_entry(entry);
 
-	/* Convert the text to UTF-16. */
-	const char *src = text;
-	wchar_t *text_utf16 = new wchar_t[length + 1];
-	mbsrtowcs(text_utf16, &src, length, NULL);
-	text_utf16[length] = L'\0';
-
 	IDWriteTextAnalyzer *analyzer;
 	HRESULT hr = back_end->dw_factory->CreateTextAnalyzer(&analyzer);
 	d2d_check(hr, "CreateTextAnalyzer");
@@ -267,7 +261,7 @@ static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const char *text,
 		glyph_indices = new uint16_t[capacity];
 		glyph_properties = new DWRITE_SHAPING_GLYPH_PROPERTIES[capacity];
 		hr = analyzer->GetGlyphs(
-			text_utf16, length,
+			(const wchar_t *)text, length,
 			bef->face, 
 			FALSE, FALSE,
 			&script_analysis, L"", 
@@ -287,7 +281,7 @@ static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const char *text,
 	float *glyph_advances = new float[num_glyphs];
 	DWRITE_GLYPH_OFFSET *glyph_offsets = new DWRITE_GLYPH_OFFSET[num_glyphs];
 	hr = analyzer->GetGlyphPlacements(
-		text_utf16, 
+		(const wchar_t *)text, 
 		clusters, 
 		text_properties, 
 		length,
@@ -307,7 +301,6 @@ static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const char *text,
 	delete [] text_properties;
 	delete [] glyph_properties;
 	delete [] glyph_offsets;
-	delete [] text_utf16;
 
 	analyzer->Release();
 
@@ -324,23 +317,17 @@ static TextRunCacheEntry *d2d_trc_find(BackEnd *back_end, const char *text,
 	return entry;
 }
 
-void platform_measure_text(BackEnd *back_end, void *font_handle, 
-	const char *text, unsigned length, unsigned *width, unsigned *height, 
-	unsigned *character_widths)
+unsigned platform_measure_text(BackEnd *back_end, void *font_handle, 
+	const void *text, unsigned length, unsigned *advances)
 {
-	const TextRunCacheEntry *rce = d2d_trc_find(back_end, text, length, 
-		(BackEndFont *)font_handle);
+	const TextRunCacheEntry *rce = d2d_trc_find(back_end, 
+		(const uint16_t *)text, length, (BackEndFont *)font_handle);
 	if (rce == NULL)
-		return;
-	if (width != NULL)
-		*width = rce->width;
-	if (height != NULL)
-		*height = rce->height;
-	if (character_widths != NULL) {
-		for (unsigned i = 0; i < length; ++i) {
-			character_widths[i] = unsigned(rce->glyph_advances[i] + 0.5f);
-		}
-	}
+		return 0;
+	for (unsigned i = 0; i < rce->num_glyphs; ++i)
+		advances[i] = (unsigned)round_float_to_fixed(rce->glyph_advances[i], 
+			TEXT_METRIC_PRECISION);
+	return rce->num_glyphs;
 }
 
 void platform_font_metrics(BackEnd *back_end, void *font_handle, 
@@ -348,7 +335,8 @@ void platform_font_metrics(BackEnd *back_end, void *font_handle,
 {
 	back_end;
 	const BackEndFont *bef = (BackEndFont *)font_handle;
-	result->height = round_signed(bef->cell_height);
+	result->height = round_float_to_fixed(bef->cell_height, 
+		TEXT_METRIC_PRECISION);
 	result->em_width = result->height;
 }
 
@@ -427,24 +415,25 @@ static void d2d_draw_rectangle(BackEnd *be, const RectangleCommandData *data)
 }
 
 
-static void d2d_draw_text_run(BackEnd *be, const TextCommandData *d, 
-	unsigned start, unsigned length, BackEndFont *font, int x, int y,
-	ID2D1SolidColorBrush *brush)
+static void d2d_draw_text_run(BackEnd *be, 
+	const uint16_t *text, unsigned length, 
+	BackEndFont *font, ID2D1SolidColorBrush *brush,
+	const int *x_positions, int y)
 {
 	static const unsigned ADVANCE_BUFFER_SIZE = 256;
 
-	TextRunCacheEntry *rce = d2d_trc_find(be, d->text + start, length, font);
+	TextRunCacheEntry *rce = d2d_trc_find(be, text, length, font);
 	if (rce == NULL)
 		return;
 		
-	/* Build an array of glyph advances from horizontal positions in the text 
-	 * layer. */
+	/* Build an array of glyph advances from horizontal positions in the 
+	 * command. */
 	float static_advances[ADVANCE_BUFFER_SIZE];
-	float *advances = length > ADVANCE_BUFFER_SIZE ? 
-		new float[length] : static_advances;
-	int last_x0 = x;
-	for (unsigned i = 1; i < length; ++i) {
-		int char_x0 = d->positions[2 * (start + i) + 0];
+	float *advances = rce->num_glyphs > ADVANCE_BUFFER_SIZE ? 
+		new float[rce->num_glyphs] : static_advances;
+	int x0 = x_positions[0], last_x0 = x0;
+	for (unsigned i = 1; i < rce->num_glyphs; ++i) {
+		int char_x0 = x_positions[i];
 		int width = char_x0 - last_x0;
 		advances[i - 1] = (float)width;
 		last_x0 = char_x0;
@@ -461,7 +450,7 @@ static void d2d_draw_text_run(BackEnd *be, const TextCommandData *d,
 	glyph_run.glyphOffsets = NULL;
 	glyph_run.isSideways = FALSE;
 	glyph_run.bidiLevel = 0;
-	D2D1_POINT_2F pos = D2D1::Point2F((float)x, (float)y + font->ascent);
+	D2D1_POINT_2F pos = D2D1::Point2F((float)x0, (float)y + font->ascent);
 	be->d2d_rt->DrawGlyphRun(pos, &glyph_run, brush);
 
 	if (advances != static_advances)
@@ -472,49 +461,22 @@ static void d2d_draw_text(BackEnd *be, View *view, const TextCommandData *d)
 {
 	if (d->length == 0)
 		return;
-
-	/* Make a brush for each palette entry. */
-	static const unsigned NUM_STATIC_BRUSHES = 64;
-	ID2D1SolidColorBrush *static_brushes[64], **brushes = static_brushes;
-	if (d->num_colors > NUM_STATIC_BRUSHES)
-		brushes = new ID2D1SolidColorBrush *[d->num_colors];
-	for (unsigned i = 0; i < d->num_colors; ++i) {
-		HRESULT hr = be->d2d_rt->CreateSolidColorBrush(
-			d2d_convert_color(d->palette[i]), &brushes[i]);
-		d2d_check(hr, "CreateSolidColorBrush");
-	}
-
-	/* Draw the text. */
 	System *system = view->document->system;
 	BackEndFont *font = (BackEndFont *)get_font_handle(system, d->font_id);
-	int run_x0 = d->positions[0 + 0];
-	int run_y0 = d->positions[0 + 1];
-	int last_color_index = d->flags[0] & TLF_COLOR_INDEX_MASK;
-	unsigned run_start = 0;
-	for (unsigned i = 0; i < d->length; ++i) {
-		int x = d->positions[2 * i + 0];
-		int y = d->positions[2 * i + 1];
-		unsigned flags = d->flags[i];
-		int color_index = flags & TLF_COLOR_INDEX_MASK;
-		if ((flags & (TLF_LINE_HEAD | TLF_STYLE_HEAD)) != 0 || 
-			color_index != last_color_index) {
-			unsigned run_length = i - run_start;
-			d2d_draw_text_run(be, d, run_start, run_length, font, 
-				run_x0, run_y0, brushes[last_color_index]);
-			run_start = i;
-			run_x0 = x;
-			run_y0 = y;
-			last_color_index = color_index;
-		}
+	const uint16_t *text = d->text.utf16;
+	const int *x_positions = d->x_positions;
+	for (unsigned i = 0; i < d->num_colors; ++i) {
+		ID2D1SolidColorBrush *brush = NULL;
+		HRESULT hr = be->d2d_rt->CreateSolidColorBrush(
+			d2d_convert_color(d->colors[i]), &brush);
+			d2d_check(hr, "CreateSolidColorBrush");
+		unsigned num_code_units = d->color_code_unit_counts[i];
+		d2d_draw_text_run(be, text, num_code_units, font, brush, 
+			x_positions, d->line_y_position);
+		brush->Release();
+		text += num_code_units;
+		x_positions += d->color_character_counts[i];
 	}
-	unsigned run_length = d->length - run_start;
-	d2d_draw_text_run(be, d, run_start, run_length, font, 
-		run_x0, run_y0, brushes[last_color_index]);
-
-	for (unsigned i = 0; i < d->num_colors; ++i)
-		brushes[i]->Release();
-	if (brushes != static_brushes)
-		delete [] brushes;
 }
 
 static ID2D1Bitmap *d2d_get_tinted_bitmap(BackEnd *back_end, 

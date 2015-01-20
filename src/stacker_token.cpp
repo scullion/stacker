@@ -177,13 +177,14 @@ bool is_keyword(int token)
 	return token >= TOKEN_KEYWORD_FIRST && token < TOKEN_KEYWORD_LAST;
 }
 
+/* Finds the token corresponding to a keyword string. */
 int find_keyword(const char *s, unsigned length)
 {
-	length;
 	for (unsigned i = TOKEN_KEYWORD_FIRST; i != TOKEN_KEYWORD_LAST; ++i) {
+		assertb(TOKEN_STRINGS[i] != NULL);
 		const char *ts = TOKEN_STRINGS[i];
-		assertb(ts != NULL);
-		if (0 == strcmp(ts, s))
+		unsigned slen = strlen(ts);
+		if (slen == length && 0 == memcmp(ts, s, slen))
 			return (int)i;
 	}
 	return TOKEN_INVALID;

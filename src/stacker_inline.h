@@ -4,6 +4,7 @@
 #include <climits>
 
 #include "stacker.h"
+#include "stacker_paragraph.h"
 
 namespace stkr {
 
@@ -12,50 +13,16 @@ struct Node;
 struct Box;
 struct VisualLayer;
 
-enum InlineTokenType { 
-	TTT_WORD,
-	TTT_SPACE, 
-	TTT_BREAK, 
-	TTT_CHILD, 
-	TTT_EOS,
-	NUM_INLINE_TOKEN_TYPES
-};
-
-enum InlineTokenFlag {
-	ITF_HAS_PARAGRAPH_BOX = 1 << 0, // Token has a corresponding PET_BOX paragraph element.
-	ITF_POSITIONED        = 1 << 1, // Token is the first in the run of tokens posioned by a text box.
-	ITF_MULTIPART_HEAD    = 1 << 2, // Token is the first part of a hyphenated word.
-	ITF_MULTIPART_TAIL    = 1 << 3  // Token a part of a hyphenated word other than the first.
-};
-
-const char * const INLINE_TOKEN_STRINGS[NUM_INLINE_TOKEN_TYPES] = 
-	{ "TTT_WORD", "TTT_SPACE", "TTT_BREAK", "TTT_CHILD", "TTT_EOS" };
-
-/* A pseudo character returned when the tokenizer encounters a non-text child.
- * It behaves like a zero-width space, breaking any word token surrounding
- * the child into two. */
-const int ITOK_CHILD = -1;
-
-struct InlineToken {
-	InlineTokenType type;
-	uint16_t flags;
-	unsigned start, end;
-	float width, height;
-	const Node *child;
-	Box *text_box;
-	unsigned child_offset;
-};
 
 /* Data associated with LCTX_INLINE nodes. */
 struct InlineContext {
 	char *text;
-	unsigned *advances;
 	unsigned text_length;
-	InlineToken *tokens;
-	unsigned num_tokens;
+	ParagraphElement *elements;
+	unsigned num_elements;
 	Box *text_boxes;
-	InternalAddress selection_start;
-	InternalAddress selection_end;
+	unsigned selection_start;
+	unsigned selection_end;
 };
 
 /* How to decide which end of a node to return when an address being rewritten
@@ -109,19 +76,16 @@ struct InlineTokenizer {
 	const Node *root;
 	InlineTokenizerPosition pos;
 	WhiteSpaceMode mode;
-	InlineToken token;
 	unsigned repeat_count;
 	char *text;
 	unsigned text_length;
-	InlineToken *tokens;
-	unsigned num_tokens;
-	unsigned chunk_length;
-	unsigned max_chunk_length;
+	ParagraphElement *elements;
+	unsigned num_elements;
 };
 
 
-CaretAddress caret_start(const Document *document, const Node *node);
-CaretAddress caret_end(const Document *document, const Node *node);
+CaretAddress start_address(const Document *document, const Node *node);
+CaretAddress end_address(const Document *document, const Node *node);
 CaretAddress canonical_address(const Document *document, CaretAddress address);
 InternalAddress closest_internal_address(const Document *document, 
 	const Node *node, CaretAddress address, AddressRewriteMode mode);
@@ -135,8 +99,8 @@ Node *cwalk_next(Document *document, CaretWalker *w);
 
 void rebuild_inline_context(Document *document, Node *node);
 void destroy_inline_context(Document *document, Node *node);
-unsigned inline_token_index(const InlineContext *icb, unsigned token);
-const InlineToken *inline_token(const InlineContext *icb, unsigned token);
+unsigned inline_element_index(const InlineContext *icb, unsigned token);
+const InlineToken *inline_element(const InlineContext *icb, unsigned token);
 InternalAddress expand_internal_address(const Node *node, InternalAddress ia);
 bool same_internal_address(const Node *node, const InternalAddress a, 
 	const InternalAddress b);

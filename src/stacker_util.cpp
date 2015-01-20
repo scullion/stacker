@@ -234,21 +234,21 @@ const char *random_word(uintptr_t seed)
 	return DICTIONARY[murmur3_32(&seed, sizeof(seed)) % NUM_WORDS];
 }
 
-
 /*
  * Doubly-linked List
  */
 
 struct Link { void *prev, *next; };
-#define item_prev(item, offset) ((Link *)(((char *)(item) + offset)))->prev
 #define item_next(item, offset) ((Link *)(((char *)(item) + offset)))->next
+#define item_prev(item, offset) ((Link *)(((char *)(item) + offset)))->prev
 
 void list_insert_before(void **head, void **tail, void *item, void *next, 
 	unsigned offset)
 {
+	assertb(next != item);
 	void *prev;
 	if (next != NULL) {
-		prev = item_prev(item, offset);
+		prev = item_prev(next, offset);
 		item_prev(next, offset) = item;
 	} else {
 		prev = *tail;
@@ -266,54 +266,73 @@ void list_remove(void **head, void **tail, void *item, unsigned offset)
 {
 	void *prev = item_prev(item, offset);
 	void *next = item_next(item, offset);
-	if (prev != NULL)
+	if (prev != NULL) {
 		item_next(prev, offset) = next;
-	else
+	} else {
+		assertb(item == *head);
 		*head = next;
-	if (next != NULL)
+	}
+	if (next != NULL) {
 		item_prev(next, offset) = prev;
-	else
+	} else {
+		assertb(item == *tail);
 		*tail = prev;
+	}
 	item_prev(item, offset) = NULL;
 	item_next(item, offset) = NULL;
 }
 
 /*
- * Tree Utilities
+ * Fixed Point Arithmetic
  */
 
-#define item_parent(item, offset) *(void **)((char *)(item) + (offset))
-
-/* Determines the first tree ancestor common to A and B. The result is NULL
- * if the nodes are not part of the same tree. */
-const void *lowest_common_ancestor(const void *a, const void *b,
-	const void **below_a, const void **below_b, unsigned parent_offset)
+int32_t int_to_fixed(int32_t n, unsigned q)
 {
-	static const unsigned MAX_TREE_DEPTH = 64;
+	return n << q;
+}
 
-	const void *pa[MAX_TREE_DEPTH], *pb[MAX_TREE_DEPTH];
-	unsigned da = 0, db = 0;
-	while (a != NULL) {
-		ensure(da != MAX_TREE_DEPTH);
-		pa[da++] = a;
-		a = item_parent(a, parent_offset);
-	}
-	while (b != NULL) {
-		ensure(db != MAX_TREE_DEPTH);
-		pb[db++] = b;
-		b = item_parent(b, parent_offset);
-	}
-	const void *ancestor = NULL;
-	do {
-		if (pa[--da] != pb[--db])
-			break;
-		ancestor = pa[da];
-	} while (da != 0 && db != 0);
-	if (below_a != NULL)
-		*below_a = (ancestor != a) ? pa[da] : NULL;
-	if (below_b != NULL)
-		*below_b = (ancestor != b) ? pb[db] : NULL;
-	return ancestor;
+/* Multiplies two fixed point numbers. */
+int32_t fixed_multiply(int32_t a, int32_t b, unsigned q)
+{
+	return int32_t((int64_t(a) * b) >> q);
+}
+
+/* Divides two fixed point numbers. */
+int32_t fixed_divide(int32_t a, int32_t b, unsigned q)
+{
+	return int32_t((int64_t(a) << q) / b);
+}
+
+
+/* Rounds a float to the nearest fixed point number. */
+int32_t round_float_to_fixed(float n, unsigned q)
+{
+	float h = (n >= 0.0f) ? 0.5f : -0.5f;
+	return int(n * float(1 << q) + h);
+}
+
+/* Rounds a fixed point number. */
+int32_t round_fixed(int32_t n, unsigned q)
+{
+	int32_t sign = (n >> 31) | 1;
+	int32_t half = sign << (q - 1);
+	int32_t mask = (1 << q) - 1;
+	return (n + half) & ~mask;
+}
+
+int32_t round_fixed_to_int(int32_t n, unsigned q)
+{
+	return (n + (1 << (q - 1))) >> q;
+}
+
+int32_t fixed_ceil_as_int(int32_t n, unsigned q)
+{
+	return (n + ((1 << q) - 1)) >> q;
+}
+
+double fixed_to_double(int32_t n, unsigned q)
+{
+	return double(n) / double(1 << q);
 }
 
 } // namespace stkr

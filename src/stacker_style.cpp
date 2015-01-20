@@ -12,7 +12,6 @@ extern const NodeStyle DEFAULT_NODE_STYLE = {
 	WSM_NORMAL,                               // white_space_mode
 	WRAPMODE_WORD,                            // wrap_mode
 	{ 
-		0,                                    // key
 		INVALID_FONT_ID,                      // font_id
 		0,                                    // flags
 		0xFF000000,                           // color
@@ -21,15 +20,6 @@ extern const NodeStyle DEFAULT_NODE_STYLE = {
 	0,                                        // hanging_indent 
 	0                                         // leading
 };
-
-/* Makes a unique key identifying a (font, colour) combination. These are used
- * to bucket characters that can be drawn together. Collisions aren't 
- * catastrophic. */
-void update_text_style_key(TextStyle *style)
-{
-	style->key = 0;
-	style->key = murmur3_32(style, sizeof(TextStyle));
-}
 
 /* Returns a mask summarizing the differences between two style objects. */
 unsigned compare_styles(const NodeStyle *a, const NodeStyle *b)
@@ -53,6 +43,21 @@ unsigned compare_styles(const NodeStyle *a, const NodeStyle *b)
 		result |= STYLECMP_MUST_REPAINT;
 	}
 	return result;
+}
+
+/* True if characters in two different text styles can be passed to the back
+ * end together for text measurement. */
+bool measurement_compatible(const TextStyle *a, const TextStyle *b)
+{
+	return a->font_id == b->font_id;
+}
+
+/* True if characters in two different text styles which are known to be 
+ * measurement-compatible can be part of the same fragment. */
+bool fragment_compatible(const TextStyle *a, const TextStyle *b)
+{
+	assertb(measurement_compatible(a, b));
+	return a->color == b->color && a->tint == b->tint;
 }
 
 } // namespace stkr

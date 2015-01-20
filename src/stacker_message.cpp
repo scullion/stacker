@@ -78,7 +78,7 @@ const Message *dequeue_message(MessageQueue *queue)
  * cursor. */
 static bool maybe_set_cursor(Document *document, Node *node)
 {
-	if ((node->flags & (NFLAG_MOUSE_OVER | NFLAG_MOUSE_OVER_CHILD)) == 0)
+	if ((node->t.flags & (NFLAG_MOUSE_OVER | NFLAG_MOUSE_OVER_CHILD)) == 0)
 		return false;
 	int node_cursor = read_mode(node, TOKEN_CURSOR);
 	if (node_cursor != ADEF_UNDEFINED) {
@@ -109,7 +109,7 @@ static bool handle_node_hit(Document *document, Node *node,
 		node->mouse_hit_stamp = document->hit_clock;
 		
 		/* Add the node to the hit chain. */
-		if ((node->flags & NFLAG_IN_HIT_CHAIN) == 0) {
+		if ((node->t.flags & NFLAG_IN_HIT_CHAIN) == 0) {
 			list_insert_before(
 				(void **)&document->hit_chain_head, 
 				(void **)&document->hit_chain_tail,
@@ -133,7 +133,7 @@ static bool handle_node_unhit(Document *document, Node *node,
 {
 	message;
 	/* Remove the node from the hit chain. */
-	if ((node->flags & NFLAG_IN_HIT_CHAIN) != 0) {
+	if ((node->t.flags & NFLAG_IN_HIT_CHAIN) != 0) {
 		list_remove(
 			(void **)&document->hit_chain_head, 
 			(void **)&document->hit_chain_tail,
@@ -173,7 +173,7 @@ static bool handle_hyperlink_message(Document *document, Node *node,
 	if (message->type == MSG_NODE_HIT || message->type == MSG_NODE_UNHIT) {
 		handle_node_message(document, node, message);
 		bool highlight = is_enabled(node) && 
-			(node->flags & NFLAG_MOUSE_OVER_CHILD) != 0;
+			(node->t.flags & NFLAG_MOUSE_OVER_CHILD) != 0;
 		set_interaction_state(document, node, NFLAG_INTERACTION_HIGHLIGHTED,
 			highlight);
 		return true;
@@ -205,7 +205,7 @@ bool send_message(Document *document, Node *node, Message *message)
 		}
 		if (handled || handle_node_message(document, node, message))
 			message->flags |= MFLAG_HANDLED;
-		node = node->parent; 
+		node = node->t.parent.node; 
 	}
 	if ((message->flags & MFLAG_PROPAGATE) != 0 && 
 		document_handle_message(document, message))

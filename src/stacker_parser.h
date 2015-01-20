@@ -19,6 +19,14 @@ enum ParserFlag {
 	PARSEFLAG_SINGLE_NODE = 1 << 0 /* Stop after parsing the first node in the input. */
 };
 
+struct Position {
+	unsigned pos;
+	unsigned pos_ch0;
+	unsigned pos_ch1;
+	uint32_t ch0;
+	uint32_t ch1;
+};
+
 struct Parser {
 	System *system;
 	Document *document;
@@ -29,6 +37,10 @@ struct Parser {
 	Variant token_value;
 	const char *input;
 	unsigned pos;
+	unsigned pos_ch0;
+	unsigned pos_ch1;
+	uint32_t ch0;
+	uint32_t ch1;
 	unsigned token_start;
 	unsigned token_escape_count;
 	unsigned input_size;
@@ -38,10 +50,17 @@ struct Parser {
 	Node *scope;
 	unsigned flags;
 	int code;
-	char message[MAX_MESSAGE_SIZE + 1];
+	union {
+		void     *data;
+		char     *utf8;
+		uint16_t *utf16;
+		uint32_t *utf32;
+	} message;
+	unsigned message_length;
 };
 
 void init_parser(Parser *parser);
+void deinit_parser(Parser *parser);
 int parse(Parser *parser, Document *document, Node *root, 
 	const char *input, unsigned length);
 

@@ -10,19 +10,41 @@
 
 namespace stkr {
 
-inline bool isident(char ch)
+inline unsigned set_or_clear(unsigned word, unsigned mask, bool value)
 {
-	return isalnum(ch) || ch == '_' || ch == '-';
+	return word ^ (mask & (-int(value) ^ word));
 }
 
-inline bool isidentfirst(char ch)
+inline unsigned bitfield_read(unsigned w, unsigned shift, unsigned mask)
 {
-	return isalpha(ch) || ch == '_';
+	return (w & mask) >> shift;
 }
 
-inline uint32_t set_or_clear(uint32_t word, uint32_t mask, bool value)
+inline unsigned bitfield_write(unsigned w, unsigned shift, unsigned mask, 
+	unsigned value)
 {
-	return word ^ (mask & (-int32_t(value) ^ word));
+	return (w & ~mask) | (value << shift);
+}
+
+/* Returns the index of the lowest set bit in 'word'. Returns zero if the word
+ * is zero. */
+inline unsigned lowest_set_bit(unsigned word)
+{
+	static const unsigned DEBRUIJN[32] = { 
+		 0,  1, 28,  2, 29, 14, 24, 3, 
+		30, 22, 20, 15, 25, 17,  4, 8, 
+		31, 27, 13, 23, 21, 19, 16, 7, 
+		26, 12, 18,  6, 11,  5, 10, 9
+	};
+	unsigned lsb = word & -int(word);
+	return DEBRUIJN[(lsb * 0x077CB531u) >> 27];
+}
+
+/* Compares two wrapping time stamps. Valid only under the assumption that B
+ * does not move ahead of A by more than 2^31. */
+inline bool stamp_less(uint32_t a, uint32_t b)
+{
+	return int32_t(a - b) < 0;
 }
 
 inline int16_t saturate16(int n)
@@ -149,12 +171,20 @@ inline bool rectangles_overlap(float ax0, float ax1, float ay0, float ay1,
  	return (ax0 <= bx1 && bx0 <= ax1) && (ay0 <= by1 && by0 <= ay1);
 }
 
-inline void intersect(const float a[4], const float b[4], float *r)
+inline void rect_intersect(const float a[4], const float b[4], float *r)
 {
 	r[0] = a[0] >= b[0] ? a[0] : b[0];
 	r[1] = a[1] <= b[1] ? a[1] : b[1];
 	r[2] = a[2] >= b[2] ? a[2] : b[2];
 	r[3] = a[3] <= b[3] ? a[3] : b[3];
+}
+
+inline void rect_union(const float a[4], const float b[4], float *r)
+{
+	r[0] = a[0] <= b[0] ? a[0] : b[0];
+	r[1] = a[1] >= b[1] ? a[1] : b[1];
+	r[2] = a[2] <= b[2] ? a[2] : b[2];
+	r[3] = a[3] >= b[3] ? a[3] : b[3];
 }
 
 void align_1d(enum Alignment alignment, float dim, float offset,
@@ -173,8 +203,15 @@ const char *random_word(uintptr_t seed);
 void list_insert_before(void **head, void **tail, void *item, void *next, 
 	unsigned offset);
 void list_remove(void **head, void **tail, void *item, unsigned offset);
-const void *lowest_common_ancestor(const void *a, const void *b,
-	const void **below_a, const void **below_b, unsigned parent_offset);
+
+int32_t int_to_fixed(int32_t n, unsigned q);
+int32_t round_float_to_fixed(float n, unsigned q);
+int32_t fixed_multiply(int32_t a, int32_t b, unsigned q);
+int32_t fixed_divide(int32_t a, int32_t b, unsigned q);
+int32_t round_fixed(int32_t n, unsigned q);
+int32_t round_fixed_to_int(int32_t n, unsigned q);
+int32_t fixed_ceil_as_int(int32_t n, unsigned q);
+double fixed_to_double(int32_t n, unsigned q);
 
 extern const float INFINITE_RECTANGLE[4];
 

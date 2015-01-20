@@ -22,7 +22,6 @@ enum SegmentStyleFlag {
 
 /* The subset of style information required to measure and draw text runs. */
 struct TextStyle {
-	uint32_t key;
 	int16_t font_id;
 	uint16_t flags;
 	uint32_t color;
@@ -67,7 +66,8 @@ const uint32_t DEFAULT_ACTIVE_LINK_COLOR        = 0xFF0FFABB;
 
 extern const NodeStyle DEFAULT_NODE_STYLE;
 
-void update_text_style_key(TextStyle *style);
 unsigned compare_styles(const NodeStyle *a, const NodeStyle *b);
+bool measurement_compatible(const TextStyle *a, const TextStyle *b);
+bool fragment_compatible(const TextStyle *a, const TextStyle *b);
 
 } // namespace stkr

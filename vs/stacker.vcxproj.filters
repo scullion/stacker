@@ -76,6 +76,15 @@
     <ClCompile Include="..\src\stacker_layout.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\stacker_inline2.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_encoding.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_tree.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\stacker.h">
@@ -159,6 +168,18 @@
     <ClInclude Include="..\src\stacker_layout.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\stacker_inline2.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_encoding.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_win32.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\stacker_tree.h">
+      <Filter>src</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="data">
@@ -228,5 +249,32 @@
     <None Include="..\data\samples\white_space.stacker">
       <Filter>data</Filter>
     </None>
+    <None Include="..\data\samples\the_chicken_or_the_egg.stacker">
+      <Filter>data</Filter>
+    </None>
+    <None Include="..\data\samples\flex.stacker">
+      <Filter>data</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\data\images\angry32.png" />
+    <Image Include="..\data\images\beam32.png" />
+    <Image Include="..\data\images\cool32.png" />
+    <Image Include="..\data\images\embarassed16.png" />
+    <Image Include="..\data\images\embarassed32.png" />
+    <Image Include="..\data\images\frown32.png" />
+    <Image Include="..\data\images\geek32.png" />
+    <Image Include="..\data\images\ill32.png" />
+    <Image Include="..\data\images\lol16.png" />
+    <Image Include="..\data\images\lol32.png" />
+    <Image Include="..\data\images\rofl16.png" />
+    <Image Include="..\data\images\rofl32.png" />
+    <Image Include="..\data\images\sad32.png" />
+    <Image Include="..\data\images\shocked32.png" />
+    <Image Include="..\data\images\smile16.png" />
+    <Image Include="..\data\images\smile32.png" />
+    <Image Include="..\data\images\surprised32.png" />
+    <Image Include="..\data\images\wtf16.png" />
+    <Image Include="..\data\images\wtf32.png" />
   </ItemGroup>
 </Project>

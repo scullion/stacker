@@ -16,9 +16,14 @@
     <ClCompile Include="..\src\stacker_diagnostics.cpp" />
     <ClCompile Include="..\src\stacker_document.cpp" />
     <ClCompile Include="..\src\stacker_direct2d.cpp" />
+    <ClCompile Include="..\src\stacker_encoding.cpp" />
     <ClCompile Include="..\src\stacker_gdi.cpp" />
     <ClCompile Include="..\src\stacker_ide.cpp" />
-    <ClCompile Include="..\src\stacker_inline.cpp" />
+    <ClCompile Include="..\src\stacker_inline.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='optimized|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='debug|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\src\stacker_inline2.cpp" />
     <ClCompile Include="..\src\stacker_layer.cpp" />
     <ClCompile Include="..\src\stacker_layout.cpp" />
     <ClCompile Include="..\src\stacker_message.cpp" />
@@ -30,6 +35,7 @@
     <ClCompile Include="..\src\stacker_style.cpp" />
     <ClCompile Include="..\src\stacker_system.cpp" />
     <ClCompile Include="..\src\stacker_token.cpp" />
+    <ClCompile Include="..\src\stacker_tree.cpp" />
     <ClCompile Include="..\src\stacker_util.cpp" />
     <ClCompile Include="..\src\stacker_view.cpp" />
     <ClCompile Include="..\src\stacker_win32.cpp" />
@@ -39,6 +45,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\stacker_attribute_buffer.h" />
+    <ClInclude Include="..\src\stacker_encoding.h" />
     <ClInclude Include="..\src\stacker_gdi.h" />
     <ClInclude Include="..\src\stacker_ide_resource.h" />
     <ClInclude Include="..\src\stacker.h" />
@@ -47,6 +54,7 @@
     <ClInclude Include="..\src\stacker_diagnostics.h" />
     <ClInclude Include="..\src\stacker_document.h" />
     <ClInclude Include="..\src\stacker_direct2d.h" />
+    <ClInclude Include="..\src\stacker_inline2.h" />
     <ClInclude Include="..\src\stacker_layout.h" />
     <ClInclude Include="..\src\stacker_platform.h" />
     <ClInclude Include="..\src\stacker_inline.h" />
@@ -61,8 +69,10 @@
     <ClInclude Include="..\src\stacker_style.h" />
     <ClInclude Include="..\src\stacker_system.h" />
     <ClInclude Include="..\src\stacker_token.h" />
+    <ClInclude Include="..\src\stacker_tree.h" />
     <ClInclude Include="..\src\stacker_util.h" />
     <ClInclude Include="..\src\stacker_view.h" />
+    <ClInclude Include="..\src\stacker_win32.h" />
     <ClInclude Include="..\src\text_template.h" />
     <ClInclude Include="..\src\url_cache.h" />
   </ItemGroup>
@@ -85,6 +95,7 @@
     <None Include="..\data\samples\clipping.stacker" />
     <None Include="..\data\samples\columns.stacker" />
     <None Include="..\data\samples\complex.stacker" />
+    <None Include="..\data\samples\flex.stacker" />
     <None Include="..\data\samples\hit_test.stacker" />
     <None Include="..\data\samples\justify.stacker" />
     <None Include="..\data\samples\knuth.stacker" />
@@ -95,7 +106,31 @@
     <None Include="..\data\samples\sizing.stacker" />
     <None Include="..\data\samples\text.stacker" />
     <None Include="..\data\samples\text_styling.stacker" />
+    <None Include="..\data\samples\the_chicken_or_the_egg.stacker">
+      <SubType>Designer</SubType>
+    </None>
     <None Include="..\data\samples\white_space.stacker" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\data\images\angry32.png" />
+    <Image Include="..\data\images\beam32.png" />
+    <Image Include="..\data\images\cool32.png" />
+    <Image Include="..\data\images\embarassed16.png" />
+    <Image Include="..\data\images\embarassed32.png" />
+    <Image Include="..\data\images\frown32.png" />
+    <Image Include="..\data\images\geek32.png" />
+    <Image Include="..\data\images\ill32.png" />
+    <Image Include="..\data\images\lol16.png" />
+    <Image Include="..\data\images\lol32.png" />
+    <Image Include="..\data\images\rofl16.png" />
+    <Image Include="..\data\images\rofl32.png" />
+    <Image Include="..\data\images\sad32.png" />
+    <Image Include="..\data\images\shocked32.png" />
+    <Image Include="..\data\images\smile16.png" />
+    <Image Include="..\data\images\smile32.png" />
+    <Image Include="..\data\images\surprised32.png" />
+    <Image Include="..\data\images\wtf16.png" />
+    <Image Include="..\data\images\wtf32.png" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{28F0D096-C484-42AF-A6ED-A17D538E81D4}</ProjectGuid>

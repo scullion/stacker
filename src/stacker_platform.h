@@ -19,11 +19,21 @@ struct FontMetrics;
  */
 void *platform_match_font(BackEnd *back_end, const LogicalFont *info);
 void platform_release_font(BackEnd *back_end, void *handle);
-void platform_measure_text(BackEnd *back_end, void *font_handle, 
-	const char *text, unsigned length, unsigned *width, unsigned *height, 
-	unsigned *character_widths);
+unsigned platform_measure_text(BackEnd *back_end, void *font_handle, 
+	const void *text, unsigned length, unsigned *advances);
 void platform_font_metrics(BackEnd *back_end, void *font_handle, 
 	FontMetrics *result);
+
+
+/*
+ * Timing
+ */
+
+struct TimerValue;
+
+TimerValue platform_query_timer(void);
+bool platform_check_timeout(TimerValue start, uintptr_t timeout);
+
 
 /*
  * Network Images
@@ -44,8 +54,18 @@ void platform_test_network_image(FILE *os);
 /*
  * GUI
  */
-void platform_copy_to_clipboard(BackEnd *back_end, const char *text, 
+void platform_copy_to_clipboard(BackEnd *back_end, const void *text, 
 	unsigned length);
 
 } // namespace stkr
+
+
+#if defined(STACKER_WIN32)
+	#include "stacker_win32.h"
+#endif
+
+#if defined(STACKER_DIRECT2D)
+	#include "stacker_direct2d.h"
+#endif
+
 

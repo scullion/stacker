@@ -329,7 +329,7 @@ int parse_string_list(const char *s, int length, char *buffer,
 	unsigned buffer_size)
 {
 	int result_length = 0, elements = 0;
-	char delimiter = 0;
+	uint8_t delimiter = 0;
 	for (int i = 0; i != length; ) {
 		while (i != length && isspace(s[i]))
 			i++;
@@ -380,7 +380,7 @@ static bool string_set_contains(const char *s, unsigned length, const char *p)
 static int string_set_unique(char *s, unsigned length)
 {
 	char *d = s;
-	while (*s != '\0') {
+	while (*s != 0) {
 		unsigned item_length = 1 + strlen(s);
 		length -= item_length;
 		if (!string_set_contains(s + item_length, length, s)) {
@@ -389,7 +389,7 @@ static int string_set_unique(char *s, unsigned length)
 		}
 		s += item_length;
 	}
-	*d = '\0';
+	*d = 0;
 	return d - s;
 }
 
@@ -400,14 +400,14 @@ static int string_set_difference(char *a, const char *b, unsigned length_b)
 {
 	unsigned length_p;
 	const char *p;
-	for (p = a; *p != '\0'; p += 1 + length_p) {
+	for (p = a; *p != 0; p += 1 + length_p) {
 		length_p = strlen(p);
 		if (!string_set_contains(b, length_b, p)) {
 			strcpy(a, p);
 			a += length_p + 1;
 		}
 	}
-	*a = '\0';
+	*a = 0;
 	return a - p;
 }
 
@@ -446,7 +446,7 @@ static char *vresult_allocate(ValidationResult *vr, unsigned capacity)
 {
 	vr->storage = STORAGE_STRING;
 	if (capacity > VALIDATION_BUFFER_SIZE) {
-		vr->data = (AttributeData *)(new char[capacity]);
+		vr->data = (AttributeData *)(new uint8_t[capacity]);
 		vr->capacity = (int)capacity;
 	} else {
 		vr->data = (AttributeData *)vr->buffer;
@@ -822,7 +822,7 @@ static int validate_float(int name, ValueSemantic vs, float value,
 	return mode;
 }
 
-/* Determines whether an string (value, semantic) pair can be assigned to an
+/* Determines whether a string (value, semantic) pair can be assigned to an
  * attribute with the specified semantic. If it can, the mode the attribute
  * will be switched into is returned. Otherwise, a validation error code is
  * returned. */
@@ -1378,7 +1378,8 @@ static int abuf_fold(
 			unsigned length_b = size_b - 1;
 			unsigned length_ab;
 			ea->header.type = STORAGE_STRING;
-			char *p = ea->data.string, *q = (char *)data_b->string;
+			char *p = ea->data.string;
+			char *q = (char *)data_b->string;
 			if (op == AOP_ADD) {
 				length_ab = length_a + length_b;
 				if (ea->header.size != length_ab + 1) {
@@ -1524,17 +1525,17 @@ int abuf_read_string(const Attribute *attribute, char *buffer,
 		if (length + 1 > buffer_size)
 			length = buffer_size - 1;
 		memcpy(buffer, data, length);
-		buffer[length] = '\0';
+		buffer[length] = 0;
 
 		/* If this is a set, format a set literal of the requested type. */
 		if (attribute_semantic(attribute->name) == ASEM_STRING_SET &&
 			ssr != SSR_INTERNAL) {
-			char delimiter = (ssr == SSR_COMMA_DELIMITED) ? ',' : ' ';
+			uint8_t delimiter = (ssr == SSR_COMMA_DELIMITED) ? ',' : ' ';
 			for (unsigned i = 0; i < length; ++i)
-				if (buffer[i] == '\0')
+				if (buffer[i] == 0)
 					buffer[i] = delimiter;
 			if (length != 0)
-				buffer[--length] = '\0';
+				buffer[--length] = 0;
 		}
 	}
 	if (out_length != NULL)
@@ -1674,7 +1675,7 @@ int abuf_set(AttributeBuffer *abuf, Token name, const Variant *value,
 	switch (value->type) {
 		case VTYPE_INTEGER:
 			/* Note that tokens representing enum values go through this path.
-			 * Their integer value is the token itself. */
+			 * Their integer values are token numbers. */
 			return abuf_set_integer(abuf, name, value->semantic, 
 				value->integer, op, fold);
 		case VTYPE_FLOAT:
@@ -1777,7 +1778,8 @@ int attribute_value_string(char *buffer, unsigned buffer_size,
 	AttributeSemantic as = attribute_semantic(attribute->name);
 	switch (attribute->type) {
 		case STORAGE_NONE:
-			length = snprintf(buffer, buffer_size, "none/%u", attribute->mode); 
+			length = snprintf((char *)buffer, buffer_size, 
+				"none/%u", attribute->mode); 
 			break;
 		case STORAGE_STRING:
 			{
@@ -1785,10 +1787,10 @@ int attribute_value_string(char *buffer, unsigned buffer_size,
 				abuf_read_string(attribute, value_buffer, sizeof(value_buffer), 
 					&value_length, NULL, SSR_COMMA_DELIMITED);
 				if (as == ASEM_STRING_SET) {
-					length = snprintf(buffer, buffer_size, "{%s}/%u", 
+					length = snprintf((char *)buffer, buffer_size, "{%s}/%u", 
 						value_buffer, attribute->mode);
 				} else {
-					length = snprintf(buffer, buffer_size, "%s/%u", 
+					length = snprintf((char *)buffer, buffer_size, "%s/%u", 
 						value_buffer, attribute->mode);
 				}
 			}
@@ -1802,17 +1804,20 @@ int attribute_value_string(char *buffer, unsigned buffer_size,
 					uint32_t divisor = (attribute->type == STORAGE_INT16) ? 
 						INT16_MAX : INT32_MAX;
 					float percentage = 100.0f * (float)value / (float)divisor;
-					length = snprintf(buffer, buffer_size, "%.1f%%/%u", percentage, attribute->mode);
+					length = snprintf((char *)buffer, buffer_size, "%.1f%%/%u", 
+						percentage, attribute->mode);
 				} else {
-					length = snprintf(buffer, buffer_size, "%d/%u", value, attribute->mode);
+					length = snprintf((char *)buffer, buffer_size, "%d/%u", 
+						value, attribute->mode);
 				}
 			}
 			break;
 		case STORAGE_FLOAT32:
-			length = snprintf(buffer, buffer_size, "%.2f/%u", *(float *)data, attribute->mode);
+			length = snprintf((char *)buffer, buffer_size, "%.2f/%u", 
+				*(float *)data, attribute->mode);
 			break;
 		default:
-			length = snprintf(buffer, buffer_size, "corrupt");
+			length = snprintf((char *)buffer, buffer_size, "corrupt");
 	}
 	if (length < 0 || length == (int)buffer_size)
 		length = buffer_size - 1;

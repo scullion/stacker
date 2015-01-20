@@ -1,0 +1,5 @@
+<hbox>
+	<vbox width=50% pad=20>
+		<p width=70%>Here's some text which will size its parent.</p>
+	</vbox>
+</hbox>
