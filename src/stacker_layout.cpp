@@ -389,6 +389,15 @@ static void update_dependency_flags_postorder(Document *, Box *box,
 		unsigned ddesc = IFF_HAS_DEPENDENT_DESCENDANT_H << axis;
 		unsigned ddesc_grow = IFF_DESCENDANT_IS_GROW_H << axis;
 
+		/* FIXME (TJM): can we determine in the analysis phase whether DMODE_GROW
+		 * bounds will actually be satisfied? If they can't be, they revert to auto
+		 * sizing, which means they can generate cycles. We need to know that here
+		 * (the (flags & depends_on_children) test).
+		 * 
+		 * Currently DOC is set conservatively on grow axes, but that causes an 
+		 * unwanted reversion to preferred sizing when the grow finds a bound,
+		 * e.g. in the columns test case. */
+
 		/* If a box below depends on shrink-sized boxes, and this box is 
 		 * shrink-sized, this box is the top of a cycle. */
 		if ((frame->flags & (ddesc | ddesc_grow)) == ddesc && (flags & doc) != 0)
